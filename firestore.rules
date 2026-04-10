@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: clients
+    // Fields:
+    //   - name: string (required)
+    //   - referent: string
+    //   - email: string (email format)
+    //   - cplThreshold: number (required)
+    //   - active: bool
+    //
+    // Collection: campaigns
+    // Fields:
+    //   - clientId: string (required)
+    //   - platform: string (Meta/TikTok)
+    //   - campaignName: string (required)
+    //   - externalId: string (required)
+    //   - active: bool
+    //
+    // Collection: metrics
+    // Fields:
+    //   - campaignId: string (required)
+    //   - date: string (YYYY-MM-DD)
+    //   - leads: number
+    //   - spend: number
+    //   - cpl: number
+    //   - totalLeads: number
+    //   - totalSpend: number
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         request.auth.token.email == "info@dnacreativeagency.it");
+    }
+
+    function isValidClient(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.cplThreshold is number && data.cplThreshold >= 0;
+    }
+
+    match /clients/{clientId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidClient(request.resource.data);
+    }
+
+    match /campaigns/{campaignId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /metrics/{metricId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+  }
+}

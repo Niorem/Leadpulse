@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "A client whose lead generation campaigns are being monitored.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Client name" },
+        "referent": { "type": "string", "description": "Main contact person" },
+        "email": { "type": "string", "format": "email", "description": "Contact email" },
+        "cplThreshold": { "type": "number", "description": "Maximum acceptable CPL" },
+        "active": { "type": "boolean", "description": "Whether monitoring is active" }
+      },
+      "required": ["name", "cplThreshold"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "An advertising campaign from Meta or TikTok.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "Reference to the client" },
+        "platform": { "type": "string", "enum": ["Meta", "TikTok"], "description": "Ad platform" },
+        "campaignName": { "type": "string", "description": "Name of the campaign" },
+        "externalId": { "type": "string", "description": "ID in the external platform" },
+        "active": { "type": "boolean", "description": "Whether this campaign is being tracked" }
+      },
+      "required": ["clientId", "platform", "campaignName", "externalId"]
+    },
+    "DailyMetric": {
+      "title": "DailyMetric",
+      "description": "Daily performance metrics for a campaign.",
+      "type": "object",
+      "properties": {
+        "campaignId": { "type": "string", "description": "Reference to the campaign" },
+        "date": { "type": "string", "format": "date", "description": "Date of the metrics (YYYY-MM-DD)" },
+        "leads": { "type": "number", "description": "Number of leads received" },
+        "spend": { "type": "number", "description": "Spend in EUR" },
+        "cpl": { "type": "number", "description": "Cost per lead" },
+        "totalLeads": { "type": "number", "description": "Cumulative leads" },
+        "totalSpend": { "type": "number", "description": "Cumulative spend" }
+      },
+      "required": ["campaignId", "date", "leads", "spend"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Collection of clients"
+    },
+    "/campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Collection of campaigns"
+    },
+    "/metrics/{metricId}": {
+      "schema": "DailyMetric",
+      "description": "Collection of daily metrics"
+    }
+  }
+}
