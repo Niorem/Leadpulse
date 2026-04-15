@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Client, Campaign, DailyMetric, ClientSummary, AlertSeverity } from '../types';
+import { Client, Campaign } from '../types';
 import { useAuth } from '../lib/AuthContext';
+import { useSheetData, ClientGroup, SheetRow } from '../lib/useSheetData';
 import {
   Users, TrendingUp, AlertCircle, CheckCircle2, Clock, Download,
   Plus, ArrowUpRight, Search, LayoutDashboard, Settings, LogOut, X,
-  ChevronDown, ChevronRight, Pencil, Trash2, BarChart2
+  ChevronDown, ChevronRight, Pencil, Trash2, BarChart2, RefreshCw, Zap,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
@@ -14,10 +15,11 @@ import { format } from 'date-fns';
 import { it } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
 
-// ─── Tipi vista ─────────────────────────────────────────────────────────────
 type View = 'dashboard' | 'clients' | 'settings';
+type AlertSeverity = 'OK' | 'WARNING' | 'CRITICAL';
 
-// ─── Helpers UI ──────────────────────────────────────────────────────────────
+// ─── Helpers UI ───────────────────────────────────────────────────────────────
+
 const inputCls = "w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600/50 transition-all placeholder:text-zinc-600";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -52,19 +54,19 @@ function StatusBadge({ status }: { status: AlertSeverity }) {
   return (
     <span className={cn(
       'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',
-      status === 'OK' && 'bg-emerald-500/10 text-emerald-500',
-      status === 'WARNING' && 'bg-amber-500/10 text-amber-500',
+      status === 'OK'       && 'bg-emerald-500/10 text-emerald-500',
+      status === 'WARNING'  && 'bg-amber-500/10 text-amber-500',
       status === 'CRITICAL' && 'bg-rose-500/10 text-rose-500'
     )}>
-      {status === 'OK' && <CheckCircle2 className="w-3 h-3" />}
-      {status === 'WARNING' && <Clock className="w-3 h-3" />}
+      {status === 'OK'       && <CheckCircle2 className="w-3 h-3" />}
+      {status === 'WARNING'  && <Clock className="w-3 h-3" />}
       {status === 'CRITICAL' && <AlertCircle className="w-3 h-3" />}
       {status}
     </span>
   );
 }
 
-// ─── Modal: Nuovo / Modifica Cliente ────────────────────────────────────────
+// ─── Modal: Nuovo / Modifica Cliente ─────────────────────────────────────────
 function ClientModal({ client, onClose }: { client?: Client; onClose: () => void }) {
   const [form, setForm] = useState({
     name: client?.name || '',
@@ -95,7 +97,7 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
       }
       onClose();
     } catch (e: any) {
-      setError('Errore: ' + (e?.message || 'Permessi insufficienti — controlla le regole Firestore'));
+      setError('Errore: ' + (e?.message || 'Controlla le regole Firestore'));
     } finally {
       setSaving(false);
     }
@@ -104,10 +106,13 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
   return (
     <Overlay onClose={onClose}>
       <h2 className="text-xl font-bold mb-6 pr-8">{client ? 'Modifica Cliente' : 'Nuovo Cliente'}</h2>
+      <p className="text-zinc-400 text-sm mb-5">
+        Il nome cliente deve corrispondere esattamente alla colonna "Cliente" nel Google Sheet (es. "PAA", "FCC").
+      </p>
       {error && <p className="text-rose-400 text-sm mb-4 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
       <div className="space-y-4">
-        <Field label="Nome cliente *">
-          <input className={inputCls} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Es. Azienda SRL" />
+        <Field label="Nome cliente * (deve coincidere con il sheet)">
+          <input className={inputCls} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Es. PAA, FCC, SVD..." />
         </Field>
         <Field label="Referente">
           <input className={inputCls} value={form.referent} onChange={e => setForm(f => ({ ...f, referent: e.target.value }))} placeholder="Mario Rossi" />
@@ -116,12 +121,10 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
           <input className={inputCls} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="mario@azienda.it" />
         </Field>
         <Field label="Soglia CPL (€) *">
-          <input className={inputCls} type="number" min="0" step="0.01" value={form.cplThreshold} onChange={e => setForm(f => ({ ...f, cplThreshold: e.target.value }))} placeholder="15.00" />
+          <input className={inputCls} type="number" min="0" step="0.01" value={form.cplThreshold}
+            onChange={e => setForm(f => ({ ...f, cplThreshold: e.target.value }))} placeholder="15.00" />
         </Field>
-        <div
-          className="flex items-center gap-3 cursor-pointer"
-          onClick={() => setForm(f => ({ ...f, active: !f.active }))}
-        >
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setForm(f => ({ ...f, active: !f.active }))}>
           <div className={cn('w-10 h-6 rounded-full transition-colors relative flex-shrink-0', form.active ? 'bg-blue-600' : 'bg-zinc-700')}>
             <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all', form.active ? 'left-5' : 'left-1')} />
           </div>
@@ -138,166 +141,49 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
   );
 }
 
-// ─── Modal: Nuova / Modifica Campagna ───────────────────────────────────────
-function CampaignModal({ campaign, clientId, onClose }: { campaign?: Campaign; clientId: string; onClose: () => void }) {
-  const [form, setForm] = useState({
-    campaignName: campaign?.campaignName || '',
-    platform: campaign?.platform || 'Meta' as 'Meta' | 'TikTok',
-    externalId: campaign?.externalId || '',
-    active: campaign?.active ?? true,
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  const save = async () => {
-    if (!form.campaignName.trim()) { setError('Il nome campagna è obbligatorio'); return; }
-    setSaving(true);
-    try {
-      const data = {
-        clientId,
-        campaignName: form.campaignName.trim(),
-        platform: form.platform,
-        externalId: form.externalId.trim(),
-        active: form.active,
-      };
-      if (campaign) {
-        await updateDoc(doc(db, 'campaigns', campaign.id), data);
-      } else {
-        await addDoc(collection(db, 'campaigns'), data);
-      }
-      onClose();
-    } catch (e: any) {
-      setError('Errore: ' + (e?.message || 'Permessi insufficienti'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
+// ─── Card campagna (dettaglio) ────────────────────────────────────────────────
+function CampaignRow({ row }: { row: SheetRow }) {
+  const leads = row.lead;
+  const cpl   = row.cpl;
   return (
-    <Overlay onClose={onClose}>
-      <h2 className="text-xl font-bold mb-6 pr-8">{campaign ? 'Modifica Campagna' : 'Nuova Campagna'}</h2>
-      {error && <p className="text-rose-400 text-sm mb-4 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
-      <div className="space-y-4">
-        <Field label="Nome campagna *">
-          <input className={inputCls} value={form.campaignName} onChange={e => setForm(f => ({ ...f, campaignName: e.target.value }))} placeholder="Es. Lead Form - Primavera 2026" />
-        </Field>
-        <Field label="Piattaforma">
-          <div className="flex gap-2">
-            {(['Meta', 'TikTok'] as const).map(p => (
-              <button
-                key={p}
-                onClick={() => setForm(f => ({ ...f, platform: p }))}
-                className={cn('flex-1 py-2.5 rounded-xl text-sm font-medium border transition-all',
-                  form.platform === p ? 'bg-blue-600 border-blue-600 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-100'
-                )}
-              >{p}</button>
-            ))}
-          </div>
-        </Field>
-        <Field label="ID esterno (opzionale)">
-          <input className={inputCls} value={form.externalId} onChange={e => setForm(f => ({ ...f, externalId: e.target.value }))} placeholder="ID campagna da Meta/TikTok" />
-        </Field>
-        <div
-          className="flex items-center gap-3 cursor-pointer"
-          onClick={() => setForm(f => ({ ...f, active: !f.active }))}
-        >
-          <div className={cn('w-10 h-6 rounded-full transition-colors relative flex-shrink-0', form.active ? 'bg-blue-600' : 'bg-zinc-700')}>
-            <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all', form.active ? 'left-5' : 'left-1')} />
-          </div>
-          <span className="text-sm text-zinc-300">Campagna attiva</span>
+    <div className="flex items-center gap-4 bg-zinc-800/50 rounded-xl px-4 py-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">Meta</span>
+          <span className="text-sm font-medium truncate">{row.campagna}</span>
+          {row.stato && <span className="text-xs text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">{row.stato}</span>}
         </div>
+        <p className="text-xs text-zinc-500 mt-1 font-mono">
+          {formatNumber(leads)} lead · {formatCurrency(row.spesa)} · CPL {formatCurrency(cpl)}
+          {row.dataDa ? ` · ${row.dataDa} → ${row.dataA}` : ''}
+        </p>
       </div>
-      <div className="flex gap-3 mt-6">
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-all">Annulla</button>
-        <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all disabled:opacity-50">
-          {saving ? 'Salvataggio...' : 'Salva'}
-        </button>
+      <div className="text-right text-xs text-zinc-600 flex-shrink-0">
+        <div>{formatNumber(row.impressioni)} impr.</div>
+        <div>{formatNumber(row.click)} click</div>
       </div>
-    </Overlay>
+    </div>
   );
 }
 
-// ─── Modal: Inserimento Metriche ─────────────────────────────────────────────
-function MetricModal({ campaignId, campaignName, onClose }: { campaignId: string; campaignName: string; onClose: () => void }) {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const [form, setForm] = useState({ date: today, leads: '', spend: '' });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  const save = async () => {
-    const leads = parseInt(form.leads);
-    const spend = parseFloat(form.spend);
-    if (isNaN(leads) || leads < 0) { setError('Numero lead non valido'); return; }
-    if (isNaN(spend) || spend < 0) { setError('Spesa non valida'); return; }
-    setSaving(true);
-    try {
-      const cpl = leads > 0 ? spend / leads : 0;
-      await addDoc(collection(db, 'metrics'), {
-        campaignId, date: form.date,
-        leads, spend, cpl,
-        totalLeads: leads, totalSpend: spend,
-      });
-      onClose();
-    } catch (e: any) {
-      setError('Errore: ' + (e?.message || 'Permessi insufficienti'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const leads = parseInt(form.leads) || 0;
-  const spend = parseFloat(form.spend) || 0;
-  const cplPreview = leads > 0 ? spend / leads : 0;
-
-  return (
-    <Overlay onClose={onClose}>
-      <h2 className="text-xl font-bold mb-1 pr-8">Inserisci Metriche</h2>
-      <p className="text-zinc-400 text-sm mb-6">{campaignName}</p>
-      {error && <p className="text-rose-400 text-sm mb-4 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
-      <div className="space-y-4">
-        <Field label="Data">
-          <input className={inputCls} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-        </Field>
-        <Field label="Lead generati">
-          <input className={inputCls} type="number" min="0" value={form.leads} onChange={e => setForm(f => ({ ...f, leads: e.target.value }))} placeholder="0" />
-        </Field>
-        <Field label="Spesa (€)">
-          <input className={inputCls} type="number" min="0" step="0.01" value={form.spend} onChange={e => setForm(f => ({ ...f, spend: e.target.value }))} placeholder="0.00" />
-        </Field>
-        {(leads > 0 || spend > 0) && (
-          <div className="bg-zinc-800/60 rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-zinc-400">CPL calcolato</span>
-            <span className="font-mono font-bold text-blue-400">{formatCurrency(cplPreview)}</span>
-          </div>
-        )}
-      </div>
-      <div className="flex gap-3 mt-6">
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-all">Annulla</button>
-        <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all disabled:opacity-50">
-          {saving ? 'Salvataggio...' : 'Salva Metriche'}
-        </button>
-      </div>
-    </Overlay>
-  );
-}
-
-// ─── Dashboard principale ────────────────────────────────────────────────────
+// ─── Dashboard principale ─────────────────────────────────────────────────────
 export default function Dashboard() {
   const { user, logout } = useAuth();
+
+  // Firestore: clienti (per soglie CPL)
   const [clients, setClients] = useState<Client[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [metrics, setMetrics] = useState<DailyMetric[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [firestoreLoading, setFirestoreLoading] = useState(true);
+
+  // Google Sheets: dati Meta Ads automatici
+  const { rows, clientGroups, lastUpdate, dateRange, loading: sheetLoading, error: sheetError, refresh } = useSheetData();
 
   const [view, setView] = useState<View>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
   const [showClientModal, setShowClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | undefined>();
-  const [showCampaignModal, setShowCampaignModal] = useState<{ clientId: string; campaign?: Campaign } | null>(null);
-  const [showMetricModal, setShowMetricModal] = useState<{ campaignId: string; campaignName: string } | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -306,76 +192,78 @@ export default function Dashboard() {
     });
     const unsubCampaigns = onSnapshot(collection(db, 'campaigns'), snap => {
       setCampaigns(snap.docs.map(d => ({ id: d.id, ...d.data() } as Campaign)));
+      setFirestoreLoading(false);
     });
-    const unsubMetrics = onSnapshot(collection(db, 'metrics'), snap => {
-      setMetrics(snap.docs.map(d => ({ id: d.id, ...d.data() } as DailyMetric)));
-      setLoading(false);
-    });
-    return () => { unsubClients(); unsubCampaigns(); unsubMetrics(); };
+    return () => { unsubClients(); unsubCampaigns(); };
   }, [user]);
 
-  const getClientSummaries = (): ClientSummary[] => {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    return clients.map(client => {
-      const clientCampaigns = campaigns.filter(c => c.clientId === client.id);
-      let leadsToday = 0, spendToday = 0;
-      const campaignsWithMetrics = clientCampaigns.map(campaign => {
-        const m = metrics.find(m => m.campaignId === campaign.id && m.date === today);
-        if (m) { leadsToday += m.leads; spendToday += m.spend; }
-        return { ...campaign, metrics: m };
-      });
-      const cplToday = leadsToday > 0 ? spendToday / leadsToday : (spendToday > 0 ? 'N/A' : 0);
-      let status: AlertSeverity = 'OK';
-      if (cplToday === 'N/A') status = 'WARNING';
-      else if (typeof cplToday === 'number' && cplToday > 0) {
-        if (cplToday > client.cplThreshold) status = 'CRITICAL';
-        else if (cplToday > client.cplThreshold * 0.8) status = 'WARNING';
-      }
-      return { client, leadsToday, spendToday, cplToday, status, campaigns: campaignsWithMetrics };
-    });
+  // Helper: trova soglia CPL da Firestore per un nome cliente (match parziale)
+  const getThreshold = (clienteName: string): number | null => {
+    const match = clients.find(c =>
+      c.name.toLowerCase() === clienteName.toLowerCase() ||
+      c.name.toLowerCase().includes(clienteName.toLowerCase()) ||
+      clienteName.toLowerCase().includes(c.name.toLowerCase())
+    );
+    return match ? match.cplThreshold : null;
   };
 
-  const summaries = getClientSummaries().filter(s =>
-    s.client.name.toLowerCase().includes(searchTerm.toLowerCase())
+  // Calcola status CPL per un gruppo cliente
+  const getStatus = (group: ClientGroup): AlertSeverity => {
+    const threshold = getThreshold(group.cliente);
+    if (threshold === null || group.cpl === 0) return 'OK';
+    if (group.cpl > threshold) return 'CRITICAL';
+    if (group.cpl > threshold * 0.8) return 'WARNING';
+    return 'OK';
+  };
+
+  // Statistiche aggregate
+  const totalLeads     = clientGroups.reduce((s, g) => s + g.lead, 0);
+  const totalSpend     = clientGroups.reduce((s, g) => s + g.spesa, 0);
+  const totalCPL       = totalLeads > 0 ? totalSpend / totalLeads : 0;
+  const criticalCount  = clientGroups.filter(g => getStatus(g) === 'CRITICAL').length;
+  const totalImpressioni = rows.reduce((s, r) => s + r.impressioni, 0);
+
+  // Filtra per ricerca
+  const filteredGroups = clientGroups.filter(g =>
+    g.cliente.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  const totalLeadsToday = summaries.reduce((a, s) => a + s.leadsToday, 0);
-  const totalSpendToday = summaries.reduce((a, s) => a + s.spendToday, 0);
-  const avgCplToday = totalLeadsToday > 0 ? totalSpendToday / totalLeadsToday : 0;
-  const criticalCount = summaries.filter(s => s.status === 'CRITICAL').length;
 
   const deleteClient = async (id: string) => {
     if (!confirm('Eliminare questo cliente?')) return;
     await deleteDoc(doc(db, 'clients', id));
   };
-  const deleteCampaign = async (id: string) => {
-    if (!confirm('Eliminare questa campagna?')) return;
-    await deleteDoc(doc(db, 'campaigns', id));
-  };
 
   const downloadExcel = () => {
-    const data = summaries.flatMap(s => s.campaigns.map(c => ({
-      'Cliente': s.client.name, 'Campagna': c.campaignName, 'Piattaforma': c.platform,
-      'Lead Oggi': c.metrics?.leads || 0, 'Spesa Oggi (€)': c.metrics?.spend || 0,
-      'CPL Oggi (€)': c.metrics?.cpl || 0, 'Soglia CPL (€)': s.client.cplThreshold, 'Stato': s.status
-    })));
+    const data = rows.map(r => ({
+      'Campagna': r.campagna, 'Cliente': r.cliente,
+      'Lead (30gg)': r.lead, 'Spesa € (30gg)': r.spesa, 'CPL €': r.cpl,
+      'Impressioni': r.impressioni, 'Click': r.click,
+      'CPM €': r.cpm, 'CPC €': r.cpc,
+      'Dal': r.dataDa, 'Al': r.dataA, 'Stato': r.stato,
+    }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Report Giornaliero');
-    XLSX.writeFile(wb, `LeadPulse_Report_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Meta Ads 30gg');
+    XLSX.writeFile(wb, `LeadPulse_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
-  if (loading) {
+  const loading = firestoreLoading || sheetLoading;
+
+  if (loading && clientGroups.length === 0) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-zinc-500 text-sm">Caricamento dati Meta Ads...</p>
+        </div>
       </div>
     );
   }
 
   const navItems: { id: View; icon: React.ReactNode; label: string }[] = [
     { id: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Dashboard' },
-    { id: 'clients', icon: <Users className="w-5 h-5" />, label: 'Clienti & Campagne' },
-    { id: 'settings', icon: <Settings className="w-5 h-5" />, label: 'Impostazioni' },
+    { id: 'clients',   icon: <Users className="w-5 h-5" />,          label: 'Soglie CPL' },
+    { id: 'settings',  icon: <Settings className="w-5 h-5" />,       label: 'Impostazioni' },
   ];
 
   return (
@@ -393,6 +281,16 @@ export default function Dashboard() {
           </div>
           <span className="text-xl font-bold tracking-tight">LeadPulse</span>
         </div>
+
+        {/* Badge aggiornamento automatico */}
+        <div className="mb-6 px-3 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+            <span className="text-xs font-semibold text-emerald-400">Auto · ogni ora</span>
+          </div>
+          {lastUpdate && <p className="text-xs text-zinc-500 leading-tight">Ultimo sync: {lastUpdate}</p>}
+        </div>
+
         <nav className="flex-1 space-y-1">
           {navItems.map(item => (
             <button
@@ -407,6 +305,7 @@ export default function Dashboard() {
             </button>
           ))}
         </nav>
+
         <div className="pt-6 border-t border-zinc-800">
           <p className="text-xs text-zinc-600 px-4 mb-2 truncate">{user?.email}</p>
           <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 text-zinc-500 hover:text-red-400 transition-all font-medium text-sm">
@@ -426,31 +325,58 @@ export default function Dashboard() {
           <span className="font-bold text-lg">LeadPulse</span>
         </div>
 
-        {/* ═══ VISTA: DASHBOARD ════════════════════════════════════════════ */}
+        {/* ═══ DASHBOARD ════════════════════════════════════════════════════ */}
         {view === 'dashboard' && (
           <>
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <header className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-8">
               <div>
-                <h1 className="text-2xl font-bold">Buongiorno, {user?.displayName?.split(' ')[0] || 'Admin'}</h1>
-                <p className="text-zinc-400 text-sm">Situazione campagne — {format(new Date(), 'd MMMM yyyy', { locale: it })}</p>
+                <h1 className="text-2xl font-bold">
+                  Buongiorno, {user?.displayName?.split(' ')[0] || 'Admin'} 👋
+                </h1>
+                <p className="text-zinc-400 text-sm mt-1">
+                  Campagne Meta Ads — {format(new Date(), 'd MMMM yyyy', { locale: it })}
+                  {dateRange.from && (
+                    <span className="ml-2 text-zinc-600">· periodo {dateRange.from} → {dateRange.to}</span>
+                  )}
+                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <button onClick={downloadExcel} className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-sm font-medium transition-all">
-                  <Download className="w-4 h-4" />Esporta Excel
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Badge auto */}
+                <span className="hidden md:flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-400">
+                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                  Dati automatici da Meta Ads
+                </span>
+                <button
+                  onClick={refresh}
+                  className="p-2.5 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 rounded-xl transition-all"
+                  title="Aggiorna ora"
+                >
+                  <RefreshCw className={cn("w-4 h-4", sheetLoading && "animate-spin text-blue-400")} />
                 </button>
-                <button onClick={() => { setEditingClient(undefined); setShowClientModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-blue-600/20">
-                  <Plus className="w-4 h-4" />Nuovo Cliente
+                <button onClick={downloadExcel} className="flex items-center gap-2 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl text-sm font-medium transition-all">
+                  <Download className="w-4 h-4" />Excel
                 </button>
               </div>
             </header>
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {/* Errore sheet */}
+            {sheetError && (
+              <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-sm">
+                <p className="font-semibold text-rose-400 mb-1">⚠️ Google Sheet non accessibile</p>
+                <p className="text-zinc-400 text-xs">
+                  {sheetError}. Assicurati che il foglio sia condiviso come "Chiunque abbia il link può visualizzare".
+                </p>
+              </div>
+            )}
+
+            {/* KPI */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
               {[
-                { label: 'Lead Totali Oggi', value: formatNumber(totalLeadsToday), icon: <Users className="w-5 h-5 text-blue-500" /> },
-                { label: 'Spesa Totale Oggi', value: formatCurrency(totalSpendToday), icon: <TrendingUp className="w-5 h-5 text-purple-500" /> },
-                { label: 'CPL Medio Oggi', value: formatCurrency(avgCplToday), icon: <BarChart2 className="w-5 h-5 text-amber-500" /> },
-                { label: 'Alert Critici', value: String(criticalCount), icon: <AlertCircle className="w-5 h-5 text-rose-500" /> },
+                { label: 'Lead Totali (30gg)', value: formatNumber(totalLeads),   icon: <Users className="w-5 h-5 text-blue-500" /> },
+                { label: 'Spesa Totale (30gg)', value: formatCurrency(totalSpend), icon: <TrendingUp className="w-5 h-5 text-purple-500" /> },
+                { label: 'CPL Medio (30gg)',    value: formatCurrency(totalCPL),   icon: <BarChart2 className="w-5 h-5 text-amber-500" /> },
+                { label: 'Clienti Attivi',      value: String(clientGroups.length), icon: <CheckCircle2 className="w-5 h-5 text-emerald-500" /> },
+                { label: 'Alert Critici',        value: String(criticalCount),       icon: <AlertCircle className="w-5 h-5 text-rose-500" /> },
               ].map(stat => (
                 <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-5 rounded-3xl">
                   <div className="p-2 bg-zinc-800 rounded-lg inline-block mb-3">{stat.icon}</div>
@@ -460,7 +386,7 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Search */}
+            {/* Ricerca */}
             <div className="relative mb-5">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
               <input
@@ -470,189 +396,184 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Tabella */}
+            {/* Tabella clienti (da Google Sheets) */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-800/30">
-                      {['Cliente', 'Lead Oggi', 'Spesa Oggi', 'CPL Oggi', 'Soglia', 'Stato', ''].map(h => (
+                      {['Cliente', 'Lead (30gg)', 'Spesa (30gg)', 'CPL', 'Soglia', 'Stato', ''].map(h => (
                         <th key={h} className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800">
-                    {summaries.length === 0 ? (
+                    {filteredGroups.length === 0 && !sheetLoading ? (
                       <tr>
                         <td colSpan={7} className="px-6 py-16 text-center">
                           <div className="flex flex-col items-center gap-3 text-zinc-500">
-                            <Users className="w-10 h-10 opacity-30" />
-                            <p>Nessun cliente. Inizia aggiungendone uno!</p>
-                            <button onClick={() => setShowClientModal(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-xl transition-all">
-                              + Nuovo Cliente
-                            </button>
+                            <TrendingUp className="w-10 h-10 opacity-30" />
+                            <p>
+                              {sheetError
+                                ? 'Errore nel caricare i dati. Verifica che il foglio sia accessibile.'
+                                : 'Nessun dato. Make.com caricherà le campagne alla prossima esecuzione.'}
+                            </p>
                           </div>
                         </td>
                       </tr>
-                    ) : summaries.map(s => (
-                      <tr key={s.client.id} className="hover:bg-zinc-800/40 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-semibold">{s.client.name}</div>
-                          <div className="text-xs text-zinc-500">{s.client.referent}</div>
-                        </td>
-                        <td className="px-6 py-4 font-mono">{formatNumber(s.leadsToday)}</td>
-                        <td className="px-6 py-4 font-mono">{formatCurrency(s.spendToday)}</td>
-                        <td className="px-6 py-4 font-mono">
-                          {s.cplToday === 'N/A' ? <span className="text-amber-500">N/A</span> : formatCurrency(s.cplToday as number)}
-                        </td>
-                        <td className="px-6 py-4 text-zinc-400 font-mono">{formatCurrency(s.client.cplThreshold)}</td>
-                        <td className="px-6 py-4"><StatusBadge status={s.status} /></td>
-                        <td className="px-6 py-4 text-right">
-                          <button onClick={() => { setView('clients'); setExpandedClient(s.client.id); }} className="p-2 text-zinc-500 hover:text-zinc-100 transition-all" title="Gestisci">
-                            <ArrowUpRight className="w-5 h-5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : filteredGroups.map(g => {
+                      const threshold = getThreshold(g.cliente);
+                      const status = getStatus(g);
+                      return (
+                        <tr key={g.cliente} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="font-semibold">{g.cliente}</div>
+                            <div className="text-xs text-zinc-500">{g.campagne.length} campagne</div>
+                          </td>
+                          <td className="px-6 py-4 font-mono">{formatNumber(g.lead)}</td>
+                          <td className="px-6 py-4 font-mono">{formatCurrency(g.spesa)}</td>
+                          <td className="px-6 py-4 font-mono font-semibold">{formatCurrency(g.cpl)}</td>
+                          <td className="px-6 py-4 text-zinc-400 font-mono">
+                            {threshold !== null ? formatCurrency(threshold) : <span className="text-zinc-600">—</span>}
+                          </td>
+                          <td className="px-6 py-4"><StatusBadge status={status} /></td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={() => { setView('clients'); setExpandedClient(g.cliente); }}
+                              className="p-2 text-zinc-500 hover:text-zinc-100 transition-all"
+                              title="Dettaglio campagne"
+                            >
+                              <ArrowUpRight className="w-5 h-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
+
+            {/* Footer fonte dati */}
+            {lastUpdate && (
+              <p className="text-center text-xs text-zinc-600 mt-4">
+                Dati da Meta Ads via Make.com · Aggiornati automaticamente ogni ora · Ultimo sync: {lastUpdate}
+              </p>
+            )}
           </>
         )}
 
-        {/* ═══ VISTA: CLIENTI & CAMPAGNE ═══════════════════════════════════ */}
+        {/* ═══ SOGLIE CPL (ex Clienti & Campagne) ════════════════════════════ */}
         {view === 'clients' && (
           <>
             <header className="flex items-center justify-between mb-8">
               <div>
-                <h1 className="text-2xl font-bold">Clienti & Campagne</h1>
-                <p className="text-zinc-400 text-sm">{clients.length} clienti · {campaigns.length} campagne</p>
+                <h1 className="text-2xl font-bold">Soglie CPL & Dettaglio Campagne</h1>
+                <p className="text-zinc-400 text-sm">
+                  {clientGroups.length} clienti attivi · Imposta le soglie CPL per gli alert
+                </p>
               </div>
-              <button onClick={() => { setEditingClient(undefined); setShowClientModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all">
-                <Plus className="w-4 h-4" />Nuovo Cliente
+              <button
+                onClick={() => { setEditingClient(undefined); setShowClientModal(true); }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all"
+              >
+                <Plus className="w-4 h-4" />Soglia CPL
               </button>
             </header>
 
-            {clients.length === 0 ? (
+            {clientGroups.length === 0 ? (
               <div className="flex flex-col items-center gap-3 text-zinc-500 py-24">
-                <Users className="w-12 h-12 opacity-20" />
-                <p>Nessun cliente ancora.</p>
-                <button onClick={() => setShowClientModal(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-xl transition-all">
-                  + Aggiungi il primo cliente
-                </button>
+                <TrendingUp className="w-12 h-12 opacity-20" />
+                <p>Nessun dato ancora. Make.com aggiungerà le campagne automaticamente.</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {clients.map(client => {
-                  const clientCampaigns = campaigns.filter(c => c.clientId === client.id);
-                  const isExpanded = expandedClient === client.id;
-                  return (
-                    <div key={client.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                      <div
-                        className="flex items-center gap-4 px-6 py-4 cursor-pointer hover:bg-zinc-800/40 transition-colors"
-                        onClick={() => setExpandedClient(isExpanded ? null : client.id)}
-                      >
-                        <div className={cn('w-2 h-2 rounded-full flex-shrink-0', client.active ? 'bg-emerald-500' : 'bg-zinc-600')} />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold truncate">{client.name}</p>
-                          <p className="text-xs text-zinc-500">{client.referent}{client.email ? ` · ${client.email}` : ''} · Soglia: {formatCurrency(client.cplThreshold)}</p>
-                        </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className="text-xs text-zinc-500 mr-2">{clientCampaigns.length} camp.</span>
-                          <button onClick={e => { e.stopPropagation(); setEditingClient(client); setShowClientModal(true); }} className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all">
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button onClick={e => { e.stopPropagation(); deleteClient(client.id); }} className="p-1.5 text-zinc-500 hover:text-rose-400 transition-all">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                          {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400 ml-1" /> : <ChevronRight className="w-4 h-4 text-zinc-400 ml-1" />}
-                        </div>
-                      </div>
+                {clientGroups
+                  .filter(g => !searchTerm || g.cliente.toLowerCase().includes(searchTerm.toLowerCase()))
+                  .map(g => {
+                    const isExpanded = expandedClient === g.cliente;
+                    const threshold = getThreshold(g.cliente);
+                    const status = getStatus(g);
+                    const firestoreClient = clients.find(c =>
+                      c.name.toLowerCase() === g.cliente.toLowerCase() ||
+                      c.name.toLowerCase().includes(g.cliente.toLowerCase())
+                    );
 
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="border-t border-zinc-800 overflow-hidden"
-                          >
-                            <div className="px-6 py-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <p className="text-sm font-semibold text-zinc-300">Campagne</p>
-                                <button
-                                  onClick={() => setShowCampaignModal({ clientId: client.id })}
-                                  className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-all font-medium"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />Nuova campagna
-                                </button>
+                    return (
+                      <div key={g.cliente} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                        <div
+                          className="flex items-center gap-4 px-6 py-4 cursor-pointer hover:bg-zinc-800/40 transition-colors"
+                          onClick={() => setExpandedClient(isExpanded ? null : g.cliente)}
+                        >
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold">{g.cliente}</p>
+                            <p className="text-xs text-zinc-500">
+                              {formatNumber(g.lead)} lead · {formatCurrency(g.spesa)} · CPL {formatCurrency(g.cpl)}
+                              {threshold !== null ? ` · Soglia: ${formatCurrency(threshold)}` : ' · Nessuna soglia impostata'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <StatusBadge status={status} />
+                            {firestoreClient && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setEditingClient(firestoreClient); setShowClientModal(true); }}
+                                className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all"
+                                title="Modifica soglia"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            {!firestoreClient && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setEditingClient(undefined); setShowClientModal(true); }}
+                                className="px-2 py-1 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 rounded-lg transition-all"
+                                title="Imposta soglia CPL"
+                              >
+                                + Soglia
+                              </button>
+                            )}
+                            {isExpanded
+                              ? <ChevronDown className="w-4 h-4 text-zinc-400" />
+                              : <ChevronRight className="w-4 h-4 text-zinc-400" />
+                            }
+                          </div>
+                        </div>
+
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="border-t border-zinc-800 overflow-hidden"
+                            >
+                              <div className="px-6 py-4 space-y-2">
+                                <p className="text-sm font-semibold text-zinc-300 mb-3">
+                                  Campagne ({g.campagne.length}) · ultimi 30 giorni
+                                </p>
+                                {g.campagne.map((row, i) => (
+                                  <CampaignRow key={i} row={row} />
+                                ))}
                               </div>
-                              {clientCampaigns.length === 0 ? (
-                                <p className="text-sm text-zinc-600 py-2">Nessuna campagna. Aggiungine una!</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {clientCampaigns.map(camp => {
-                                    const todayStr = format(new Date(), 'yyyy-MM-dd');
-                                    const todayMetric = metrics.find(m => m.campaignId === camp.id && m.date === todayStr);
-                                    return (
-                                      <div key={camp.id} className="flex items-center gap-4 bg-zinc-800/50 rounded-xl px-4 py-3">
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2 flex-wrap">
-                                            <span className={cn('text-xs font-bold px-2 py-0.5 rounded-full',
-                                              camp.platform === 'Meta' ? 'bg-blue-500/20 text-blue-400' : 'bg-pink-500/20 text-pink-400'
-                                            )}>
-                                              {camp.platform}
-                                            </span>
-                                            <span className="text-sm font-medium">{camp.campaignName}</span>
-                                            {!camp.active && <span className="text-xs text-zinc-600">(inattiva)</span>}
-                                          </div>
-                                          {todayMetric ? (
-                                            <p className="text-xs text-zinc-500 mt-1">
-                                              Oggi: {todayMetric.leads} lead · {formatCurrency(todayMetric.spend)} · CPL {formatCurrency(todayMetric.cpl)}
-                                            </p>
-                                          ) : (
-                                            <p className="text-xs text-zinc-600 mt-1">Nessuna metrica per oggi</p>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                          <button
-                                            onClick={() => setShowMetricModal({ campaignId: camp.id, campaignName: camp.campaignName })}
-                                            className="px-2.5 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-lg transition-all font-medium whitespace-nowrap"
-                                          >
-                                            + Metriche
-                                          </button>
-                                          <button onClick={() => setShowCampaignModal({ clientId: client.id, campaign: camp })} className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all">
-                                            <Pencil className="w-3.5 h-3.5" />
-                                          </button>
-                                          <button onClick={() => deleteCampaign(camp.id)} className="p-1.5 text-zinc-500 hover:text-rose-400 transition-all">
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </>
         )}
 
-        {/* ═══ VISTA: IMPOSTAZIONI ═════════════════════════════════════════ */}
+        {/* ═══ IMPOSTAZIONI ═══════════════════════════════════════════════════ */}
         {view === 'settings' && (
           <>
             <header className="mb-8">
               <h1 className="text-2xl font-bold">Impostazioni</h1>
-              <p className="text-zinc-400 text-sm">Account e statistiche progetto</p>
+              <p className="text-zinc-400 text-sm">Account e configurazione</p>
             </header>
             <div className="space-y-4 max-w-lg">
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
@@ -665,14 +586,52 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-                <h3 className="font-semibold mb-3 text-sm text-zinc-400 uppercase tracking-wider">Statistiche</h3>
+                <h3 className="font-semibold mb-3 text-sm text-zinc-400 uppercase tracking-wider">Fonte dati</h3>
                 <div className="text-sm text-zinc-300 space-y-2">
-                  <div className="flex justify-between"><span className="text-zinc-500">Clienti</span><span>{clients.length}</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-500">Campagne</span><span>{campaigns.length}</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-500">Record metriche</span><span>{metrics.length}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Piattaforma</span>
+                    <span className="text-emerald-400 font-medium">Meta Ads (automatico)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Aggiornamento</span>
+                    <span>Ogni ora</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Clienti nel sheet</span>
+                    <span>{clientGroups.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Campagne nel sheet</span>
+                    <span>{rows.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Soglie CPL configurate</span>
+                    <span>{clients.length}</span>
+                  </div>
+                  {lastUpdate && (
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Ultimo sync</span>
+                      <span className="text-xs">{lastUpdate}</span>
+                    </div>
+                  )}
                 </div>
               </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+                <h3 className="font-semibold mb-2 text-sm text-zinc-400 uppercase tracking-wider">Pipeline</h3>
+                <div className="flex items-center gap-2 text-xs text-zinc-400 flex-wrap">
+                  <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded-lg font-medium">Meta Ads API</span>
+                  <span className="text-zinc-600">→</span>
+                  <span className="bg-zinc-700 px-2 py-1 rounded-lg">Make.com (ogni ora)</span>
+                  <span className="text-zinc-600">→</span>
+                  <span className="bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-lg font-medium">Google Sheets</span>
+                  <span className="text-zinc-600">→</span>
+                  <span className="bg-purple-500/20 text-purple-300 px-2 py-1 rounded-lg font-medium">LeadPulse</span>
+                </div>
+              </div>
+
               <button onClick={logout} className="flex items-center gap-2 px-4 py-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-sm font-medium transition-all w-full justify-center">
                 <LogOut className="w-4 h-4" />Disconnetti account
               </button>
@@ -681,26 +640,12 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* ═══ MODALI ══════════════════════════════════════════════════════════ */}
+      {/* ═══ MODALI ═══════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {showClientModal && (
           <ClientModal
             client={editingClient}
             onClose={() => { setShowClientModal(false); setEditingClient(undefined); }}
-          />
-        )}
-        {showCampaignModal && (
-          <CampaignModal
-            clientId={showCampaignModal.clientId}
-            campaign={showCampaignModal.campaign}
-            onClose={() => setShowCampaignModal(null)}
-          />
-        )}
-        {showMetricModal && (
-          <MetricModal
-            campaignId={showMetricModal.campaignId}
-            campaignName={showMetricModal.campaignName}
-            onClose={() => setShowMetricModal(null)}
           />
         )}
       </AnimatePresence>
