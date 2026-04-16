@@ -112,10 +112,20 @@ export function useSheetData(): UseSheetDataResult {
 
       if (data.length === 0) throw new Error('Nessuna campagna trovata nel foglio');
 
-      // Trova il batch più recente (per UltimoAgg)
-      const timestamps = [...new Set(data.map(r => r.ultimoAgg).filter(Boolean))].sort().reverse();
-      const latestTs = timestamps[0] || '';
-      const latest = latestTs ? data.filter(r => r.ultimoAgg === latestTs) : data;
+      // Trova il batch più recente (per UltimoAgg) — accetta solo DD/MM/YYYY HH:mm
+      const tsRegex = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}$/;
+      const parseTs = (ts: string): number => {
+        const m = ts.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
+        if (!m) return 0;
+        return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime();
+      };
+      const validTimestamps = [...new Set(data.map(r => r.ultimoAgg).filter(ts => tsRegex.test(ts)))]
+        .sort((a, b) => parseTs(b) - parseTs(a));
+      const latestTs = validTimestamps[0] || '';
+      // Se non ci sono timestamp validi, prova con tutti i valori non-vuoti
+      const fallbackTs = latestTs || [...new Set(data.map(r => r.ultimoAgg).filter(Boolean))].sort().reverse()[0] || '';
+      const activeTs = latestTs || fallbackTs;
+      const latest = activeTs ? data.filter(r => r.ultimoAgg === activeTs) : data;
 
       // Range date
       const dates    = latest.map(r => r.dataDa).filter(Boolean).sort();
@@ -144,7 +154,7 @@ export function useSheetData(): UseSheetDataResult {
 
       setRows(latest);
       setClientGroups(groups);
-      setLastUpdate(latestTs);
+      setLastUpdate(activeTs);
       setDateRange({ from: dates[0] || '', to: datesEnd[0] || '' });
     } catch (e: any) {
       setError(e.message || 'Errore sconosciuto');
