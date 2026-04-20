@@ -87,26 +87,20 @@ function PeriodoSelector({
   return (
     <div className="flex items-center gap-1 bg-zinc-800 rounded-xl p-1">
       <Calendar className="w-3.5 h-3.5 text-zinc-500 ml-1.5" />
-      {all.map(p => {
-        const isAvail = available.includes(p);
-        return (
-          <button
-            key={p}
-            onClick={() => isAvail && onChange(p)}
-            title={isAvail ? undefined : 'Dati non ancora disponibili per questo periodo'}
-            className={cn(
-              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-              selected === p
-                ? 'bg-blue-600 text-white shadow'
-                : isAvail
-                  ? 'text-zinc-300 hover:bg-zinc-700'
-                  : 'text-zinc-600 cursor-not-allowed'
-            )}
-          >
-            {PERIODO_LABELS[p] ?? p}
-          </button>
-        );
-      })}
+      {all.map(p => (
+        <button
+          key={p}
+          onClick={() => onChange(p)}
+          className={cn(
+            'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+            selected === p
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-zinc-300 hover:bg-zinc-700'
+          )}
+        >
+          {PERIODO_LABELS[p] ?? p}
+        </button>
+      ))}
     </div>
   );
 }
