@@ -21,6 +21,11 @@
   to = "/.netlify/functions/sheets-data"
   status = 200
 
+[[redirects]]
+  from = "/api/meta-data"
+  to = "/.netlify/functions/meta-data"
+  status = 200
+
 # SPA fallback - tutte le route vanno a index.html
 [[redirects]]
   from = "/*"
