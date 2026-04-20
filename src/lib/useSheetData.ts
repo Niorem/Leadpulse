@@ -16,6 +16,9 @@ export interface SheetRow {
   dataA: string;
   stato: string;
   ultimoAgg: string;
+  campaignId: string;
+  accountId: string;
+  periodo: string;
 }
 
 export interface ClientGroup {
@@ -33,6 +36,7 @@ export interface UseSheetDataResult {
   clientGroups: ClientGroup[];
   lastUpdate: string;
   dateRange: { from: string; to: string };
+  availablePeriods: string[];
   loading: boolean;
   error: string | null;
   refresh: () => void;
@@ -71,11 +75,12 @@ function parseCSV(text: string): string[][] {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useSheetData(): UseSheetDataResult {
+export function useSheetData(selectedPeriodo: string = 'mensile'): UseSheetDataResult {
   const [rows, setRows] = useState<SheetRow[]>([]);
   const [clientGroups, setClientGroups] = useState<ClientGroup[]>([]);
   const [lastUpdate, setLastUpdate] = useState('');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>(['mensile']);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,40 +97,51 @@ export function useSheetData(): UseSheetDataResult {
       if (parsed.length < 2) throw new Error('Foglio vuoto o non accessibile');
 
       // Salta la riga header, mappa le righe
-      const data: SheetRow[] = parsed.slice(1)
+      const allData: SheetRow[] = parsed.slice(1)
         .map(r => ({
-          campagna:   (r[0] || '').trim(),
-          cliente:    (r[1] || '').trim(),
-          lead:       parseFloat(r[2]) || 0,
-          spesa:      parseFloat(r[3]) || 0,
-          cpl:        parseFloat(r[4]) || 0,
+          campagna:    (r[0]  || '').trim(),
+          cliente:     (r[1]  || '').trim(),
+          lead:        parseFloat(r[2]) || 0,
+          spesa:       parseFloat(r[3]) || 0,
+          cpl:         parseFloat(r[4]) || 0,
           impressioni: parseFloat(r[5]) || 0,
-          click:      parseFloat(r[6]) || 0,
-          cpm:        parseFloat(r[7]) || 0,
-          cpc:        parseFloat(r[8]) || 0,
-          dataDa:     (r[9]  || '').trim(),
-          dataA:      (r[10] || '').trim(),
-          stato:      (r[11] || '').trim(),
-          ultimoAgg:  (r[12] || '').trim(),
+          click:       parseFloat(r[6]) || 0,
+          cpm:         parseFloat(r[7]) || 0,
+          cpc:         parseFloat(r[8]) || 0,
+          dataDa:      (r[9]  || '').trim(),
+          dataA:       (r[10] || '').trim(),
+          stato:       (r[11] || '').trim(),
+          ultimoAgg:   (r[12] || '').trim(),
+          campaignId:  (r[13] || '').trim(),
+          accountId:   (r[14] || '').trim(),
+          periodo:     ((r[15] || '').trim()) || 'mensile',
         }))
         .filter(r => r.campagna || r.cliente);
 
-      if (data.length === 0) throw new Error('Nessuna campagna trovata nel foglio');
+      if (allData.length === 0) throw new Error('Nessuna campagna trovata nel foglio');
 
-      // Trova il batch più recente (per UltimoAgg) — accetta solo DD/MM/YYYY HH:mm
+      // Periodi disponibili
+      const periods = [...new Set(allData.map(r => r.periodo).filter(Boolean))];
+      setAvailablePeriods(periods.length > 0 ? periods : ['mensile']);
+
+      // Filtra per periodo selezionato
+      const periodData = allData.filter(r =>
+        r.periodo === selectedPeriodo || (!r.periodo && selectedPeriodo === 'mensile')
+      );
+
+      // Trova il batch più recente per UltimoAgg — accetta solo DD/MM/YYYY HH:mm
       const tsRegex = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}$/;
       const parseTs = (ts: string): number => {
         const m = ts.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
         if (!m) return 0;
         return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]).getTime();
       };
-      const validTimestamps = [...new Set(data.map(r => r.ultimoAgg).filter(ts => tsRegex.test(ts)))]
+      const validTimestamps = [...new Set(periodData.map(r => r.ultimoAgg).filter(ts => tsRegex.test(ts)))]
         .sort((a, b) => parseTs(b) - parseTs(a));
       const latestTs = validTimestamps[0] || '';
-      // Se non ci sono timestamp validi, prova con tutti i valori non-vuoti
-      const fallbackTs = latestTs || [...new Set(data.map(r => r.ultimoAgg).filter(Boolean))].sort().reverse()[0] || '';
+      const fallbackTs = [...new Set(periodData.map(r => r.ultimoAgg).filter(Boolean))].sort().reverse()[0] || '';
       const activeTs = latestTs || fallbackTs;
-      const latest = activeTs ? data.filter(r => r.ultimoAgg === activeTs) : data;
+      const latest = activeTs ? periodData.filter(r => r.ultimoAgg === activeTs) : periodData;
 
       // Range date
       const dates    = latest.map(r => r.dataDa).filter(Boolean).sort();
@@ -161,13 +177,13 @@ export function useSheetData(): UseSheetDataResult {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedPeriodo]);
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 3600_000); // refresh ogni ora
+    const interval = setInterval(load, 3600_000);
     return () => clearInterval(interval);
   }, [load]);
 
-  return { rows, clientGroups, lastUpdate, dateRange, loading, error, refresh: load };
+  return { rows, clientGroups, lastUpdate, dateRange, availablePeriods, loading, error, refresh: load };
 }
