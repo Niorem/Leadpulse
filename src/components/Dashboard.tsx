@@ -76,23 +76,20 @@ function DateInput({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="relative flex items-center gap-2 bg-zinc-800 border border-zinc-700 hover:border-blue-500 rounded-xl px-3 py-2 transition-colors cursor-pointer">
-      <Calendar className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0 pointer-events-none" />
-      <div className="flex flex-col leading-none pointer-events-none select-none">
-        <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{label}</span>
-        <span className="text-xs text-zinc-200 font-mono mt-0.5 min-w-[72px]">
-          {value ? value.split('-').reverse().join('/') : 'gg/mm/aaaa'}
-        </span>
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider px-1">{label}</span>
+      <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:border-blue-500 focus-within:border-blue-500 rounded-xl px-3 py-2 transition-colors">
+        <Calendar className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+        <input
+          type="date"
+          min={min}
+          max={max}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          style={{ colorScheme: 'dark' }}
+          className="bg-transparent text-zinc-200 text-xs font-mono outline-none cursor-pointer w-[110px]"
+        />
       </div>
-      {/* Input invisibile posizionato sopra il box — al click apre il calendario nativo */}
-      <input
-        type="date"
-        min={min}
-        max={max}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-      />
     </div>
   );
 }
@@ -139,7 +136,7 @@ function PeriodoBar({
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -8 }}
-            className="flex flex-wrap items-center gap-2 relative"
+            className="flex flex-wrap items-end gap-2"
           >
             <DateInput
               label="Dal"
@@ -147,7 +144,7 @@ function PeriodoBar({
               max={customTo || todayStr}
               onChange={onCustomFrom}
             />
-            <span className="text-zinc-600 text-xs">→</span>
+            <span className="text-zinc-600 text-xs mb-2.5">→</span>
             <DateInput
               label="Al"
               value={customTo}
@@ -158,7 +155,7 @@ function PeriodoBar({
             <button
               onClick={onApply}
               disabled={!customFrom || !customTo}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
             >
               <Search className="w-3 h-3" />
               Cerca
