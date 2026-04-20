@@ -8,7 +8,7 @@ import {
   Users, TrendingUp, AlertCircle, CheckCircle2, Clock, Download,
   Plus, ArrowUpRight, Search, LayoutDashboard, Settings, LogOut, X,
   ChevronDown, ChevronRight, Pencil, BarChart2, RefreshCw, Zap,
-  ExternalLink, Calendar, ChevronLeft, ChevronRight as ChevronRightIcon,
+  ExternalLink, Calendar, ChevronLeft, ChevronRight as ChevronRightIcon, Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
@@ -436,6 +436,24 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showClientModal, setShowClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | undefined>();
+  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+
+  const handleDeleteClient = async (clientId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (deletingClientId === clientId) {
+      // Seconda pressione → conferma eliminazione
+      try {
+        await deleteDoc(doc(db, 'clients', clientId));
+      } catch (err) {
+        console.error('Errore eliminazione:', err);
+      } finally {
+        setDeletingClientId(null);
+      }
+    } else {
+      // Prima pressione → chiedi conferma
+      setDeletingClientId(clientId);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -736,15 +754,40 @@ export default function Dashboard() {
                           {threshold !== null ? ` · Soglia: ${formatCurrency(threshold)}` : ' · Nessuna soglia'}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         <StatusBadge status={status} />
                         {firestoreClient ? (
-                          <button
-                            onClick={e => { e.stopPropagation(); setEditingClient(firestoreClient); setShowClientModal(true); }}
-                            className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
+                          deletingClientId === firestoreClient.id ? (
+                            /* Conferma eliminazione */
+                            <div className="flex items-center gap-1 bg-rose-500/10 border border-rose-500/30 rounded-xl px-2 py-1" onClick={e => e.stopPropagation()}>
+                              <span className="text-xs text-rose-400 font-medium mr-1">Elimina?</span>
+                              <button
+                                onClick={e => handleDeleteClient(firestoreClient.id, e)}
+                                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-medium transition-all"
+                              >Sì</button>
+                              <button
+                                onClick={e => { e.stopPropagation(); setDeletingClientId(null); }}
+                                className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg text-xs font-medium transition-all"
+                              >No</button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                title="Modifica soglia"
+                                onClick={e => { e.stopPropagation(); setEditingClient(firestoreClient); setShowClientModal(true); }}
+                                className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                title="Elimina soglia"
+                                onClick={e => handleDeleteClient(firestoreClient.id, e)}
+                                className="p-1.5 text-zinc-500 hover:text-rose-400 transition-all"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )
                         ) : (
                           <button
                             onClick={e => { e.stopPropagation(); setEditingClient(undefined); setShowClientModal(true); }}
