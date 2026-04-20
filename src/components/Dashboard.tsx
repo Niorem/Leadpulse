@@ -8,6 +8,7 @@ import {
   Users, TrendingUp, AlertCircle, CheckCircle2, Clock, Download,
   Plus, ArrowUpRight, Search, LayoutDashboard, Settings, LogOut, X,
   ChevronDown, ChevronRight, Pencil, Trash2, BarChart2, RefreshCw, Zap,
+  ExternalLink, Calendar,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
@@ -63,6 +64,50 @@ function StatusBadge({ status }: { status: AlertSeverity }) {
       {status === 'CRITICAL' && <AlertCircle className="w-3 h-3" />}
       {status}
     </span>
+  );
+}
+
+// ─── Selector Periodo ─────────────────────────────────────────────────────────
+const PERIODO_LABELS: Record<string, string> = {
+  mensile:  'Mensile (30gg)',
+  oggi:     'Giornaliero',
+  last_7d:  'Settimanale (7gg)',
+};
+
+function PeriodoSelector({
+  available,
+  selected,
+  onChange,
+}: {
+  available: string[];
+  selected: string;
+  onChange: (p: string) => void;
+}) {
+  const all = ['mensile', 'oggi'];
+  return (
+    <div className="flex items-center gap-1 bg-zinc-800 rounded-xl p-1">
+      <Calendar className="w-3.5 h-3.5 text-zinc-500 ml-1.5" />
+      {all.map(p => {
+        const isAvail = available.includes(p);
+        return (
+          <button
+            key={p}
+            onClick={() => isAvail && onChange(p)}
+            title={isAvail ? undefined : 'Dati non ancora disponibili per questo periodo'}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+              selected === p
+                ? 'bg-blue-600 text-white shadow'
+                : isAvail
+                  ? 'text-zinc-300 hover:bg-zinc-700'
+                  : 'text-zinc-600 cursor-not-allowed'
+            )}
+          >
+            {PERIODO_LABELS[p] ?? p}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -143,10 +188,17 @@ function ClientModal({ client, onClose }: { client?: Client; onClose: () => void
 
 // ─── Card campagna (dettaglio) ────────────────────────────────────────────────
 function CampaignRow({ row }: { row: SheetRow }) {
-  const leads = row.lead;
-  const cpl   = row.cpl;
+  // CPL calcolato real-time (il valore nel sheet può essere 0 per righe vecchie)
+  const cpl = row.lead > 0 ? row.spesa / row.lead : 0;
+
+  // URL per aprire la campagna direttamente in Meta Ads Manager
+  const accountNum = row.accountId.replace('act_', '');
+  const bmUrl = row.campaignId && accountNum
+    ? `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${accountNum}&selected_campaign_ids=${row.campaignId}`
+    : null;
+
   return (
-    <div className="flex items-center gap-4 bg-zinc-800/50 rounded-xl px-4 py-3">
+    <div className="flex items-center gap-4 bg-zinc-800/50 rounded-xl px-4 py-3 group">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">Meta</span>
@@ -154,13 +206,27 @@ function CampaignRow({ row }: { row: SheetRow }) {
           {row.stato && <span className="text-xs text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">{row.stato}</span>}
         </div>
         <p className="text-xs text-zinc-500 mt-1 font-mono">
-          {formatNumber(leads)} lead · {formatCurrency(row.spesa)} · CPL {formatCurrency(cpl)}
+          {formatNumber(row.lead)} lead · {formatCurrency(row.spesa)} · CPL {formatCurrency(cpl)}
           {row.dataDa ? ` · ${row.dataDa} → ${row.dataA}` : ''}
         </p>
       </div>
-      <div className="text-right text-xs text-zinc-600 flex-shrink-0">
-        <div>{formatNumber(row.impressioni)} impr.</div>
-        <div>{formatNumber(row.click)} click</div>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="text-right text-xs text-zinc-600">
+          <div>{formatNumber(row.impressioni)} impr.</div>
+          <div>{formatNumber(row.click)} click</div>
+        </div>
+        {bmUrl && (
+          <a
+            href={bmUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Apri campagna in Meta Ads Manager"
+            className="p-1.5 text-zinc-600 hover:text-blue-400 transition-all opacity-0 group-hover:opacity-100"
+            onClick={e => e.stopPropagation()}
+          >
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        )}
       </div>
     </div>
   );
@@ -175,8 +241,11 @@ export default function Dashboard() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [firestoreLoading, setFirestoreLoading] = useState(true);
 
+  // Periodo selezionato
+  const [selectedPeriodo, setSelectedPeriodo] = useState('mensile');
+
   // Google Sheets: dati Meta Ads automatici
-  const { rows, clientGroups, lastUpdate, dateRange, loading: sheetLoading, error: sheetError, refresh } = useSheetData();
+  const { rows, clientGroups, lastUpdate, dateRange, availablePeriods, loading: sheetLoading, error: sheetError, refresh } = useSheetData(selectedPeriodo);
 
   const [view, setView] = useState<View>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
@@ -217,11 +286,10 @@ export default function Dashboard() {
   };
 
   // Statistiche aggregate
-  const totalLeads     = clientGroups.reduce((s, g) => s + g.lead, 0);
-  const totalSpend     = clientGroups.reduce((s, g) => s + g.spesa, 0);
-  const totalCPL       = totalLeads > 0 ? totalSpend / totalLeads : 0;
-  const criticalCount  = clientGroups.filter(g => getStatus(g) === 'CRITICAL').length;
-  const totalImpressioni = rows.reduce((s, r) => s + r.impressioni, 0);
+  const totalLeads    = clientGroups.reduce((s, g) => s + g.lead, 0);
+  const totalSpend    = clientGroups.reduce((s, g) => s + g.spesa, 0);
+  const totalCPL      = totalLeads > 0 ? totalSpend / totalLeads : 0;
+  const criticalCount = clientGroups.filter(g => getStatus(g) === 'CRITICAL').length;
 
   // Filtra per ricerca
   const filteredGroups = clientGroups.filter(g =>
@@ -236,15 +304,17 @@ export default function Dashboard() {
   const downloadExcel = () => {
     const data = rows.map(r => ({
       'Campagna': r.campagna, 'Cliente': r.cliente,
-      'Lead (30gg)': r.lead, 'Spesa € (30gg)': r.spesa, 'CPL €': r.cpl,
+      'Lead': r.lead, 'Spesa €': r.spesa,
+      'CPL €': r.lead > 0 ? +(r.spesa / r.lead).toFixed(2) : 0,
       'Impressioni': r.impressioni, 'Click': r.click,
       'CPM €': r.cpm, 'CPC €': r.cpc,
       'Dal': r.dataDa, 'Al': r.dataA, 'Stato': r.stato,
+      'Periodo': r.periodo,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Meta Ads 30gg');
-    XLSX.writeFile(wb, `LeadPulse_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, `Meta Ads ${selectedPeriodo}`);
+    XLSX.writeFile(wb, `LeadPulse_${selectedPeriodo}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
   const loading = firestoreLoading || sheetLoading;
@@ -265,6 +335,8 @@ export default function Dashboard() {
     { id: 'clients',   icon: <Users className="w-5 h-5" />,          label: 'Soglie CPL' },
     { id: 'settings',  icon: <Settings className="w-5 h-5" />,       label: 'Impostazioni' },
   ];
+
+  const periodoLabel = selectedPeriodo === 'oggi' ? 'oggi' : '30gg';
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 font-sans">
@@ -340,7 +412,13 @@ export default function Dashboard() {
                   )}
                 </p>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                {/* Selettore periodo */}
+                <PeriodoSelector
+                  available={availablePeriods}
+                  selected={selectedPeriodo}
+                  onChange={setSelectedPeriodo}
+                />
                 {/* Badge auto */}
                 <span className="hidden md:flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs text-zinc-400">
                   <Zap className="w-3.5 h-3.5 text-emerald-400" />
@@ -372,11 +450,11 @@ export default function Dashboard() {
             {/* KPI */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
               {[
-                { label: 'Lead Totali (30gg)', value: formatNumber(totalLeads),   icon: <Users className="w-5 h-5 text-blue-500" /> },
-                { label: 'Spesa Totale (30gg)', value: formatCurrency(totalSpend), icon: <TrendingUp className="w-5 h-5 text-purple-500" /> },
-                { label: 'CPL Medio (30gg)',    value: formatCurrency(totalCPL),   icon: <BarChart2 className="w-5 h-5 text-amber-500" /> },
-                { label: 'Clienti Attivi',      value: String(clientGroups.length), icon: <CheckCircle2 className="w-5 h-5 text-emerald-500" /> },
-                { label: 'Alert Critici',        value: String(criticalCount),       icon: <AlertCircle className="w-5 h-5 text-rose-500" /> },
+                { label: `Lead Totali (${periodoLabel})`,  value: formatNumber(totalLeads),    icon: <Users className="w-5 h-5 text-blue-500" /> },
+                { label: `Spesa Totale (${periodoLabel})`, value: formatCurrency(totalSpend),  icon: <TrendingUp className="w-5 h-5 text-purple-500" /> },
+                { label: `CPL Medio (${periodoLabel})`,    value: formatCurrency(totalCPL),    icon: <BarChart2 className="w-5 h-5 text-amber-500" /> },
+                { label: 'Clienti Attivi',                 value: String(clientGroups.length), icon: <CheckCircle2 className="w-5 h-5 text-emerald-500" /> },
+                { label: 'Alert Critici',                  value: String(criticalCount),       icon: <AlertCircle className="w-5 h-5 text-rose-500" /> },
               ].map(stat => (
                 <div key={stat.label} className="bg-zinc-900 border border-zinc-800 p-5 rounded-3xl">
                   <div className="p-2 bg-zinc-800 rounded-lg inline-block mb-3">{stat.icon}</div>
@@ -396,13 +474,13 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Tabella clienti (da Google Sheets) */}
+            {/* Tabella clienti */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-zinc-800 bg-zinc-800/30">
-                      {['Cliente', 'Lead (30gg)', 'Spesa (30gg)', 'CPL', 'Soglia', 'Stato', ''].map(h => (
+                      {['Cliente', `Lead (${periodoLabel})`, `Spesa (${periodoLabel})`, 'CPL', 'Soglia', 'Stato', ''].map(h => (
                         <th key={h} className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -416,7 +494,9 @@ export default function Dashboard() {
                             <p>
                               {sheetError
                                 ? 'Errore nel caricare i dati. Verifica che il foglio sia accessibile.'
-                                : 'Nessun dato. Make.com caricherà le campagne alla prossima esecuzione.'}
+                                : selectedPeriodo === 'oggi'
+                                  ? 'Dati giornalieri non ancora disponibili. Attiva il secondo scenario Make.com per il periodo "oggi".'
+                                  : 'Nessun dato. Make.com caricherà le campagne alla prossima esecuzione.'}
                             </p>
                           </div>
                         </td>
@@ -463,7 +543,7 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* ═══ SOGLIE CPL (ex Clienti & Campagne) ════════════════════════════ */}
+        {/* ═══ SOGLIE CPL ════════════════════════════════════════════════════ */}
         {view === 'clients' && (
           <>
             <header className="flex items-center justify-between mb-8">
@@ -473,18 +553,29 @@ export default function Dashboard() {
                   {clientGroups.length} clienti attivi · Imposta le soglie CPL per gli alert
                 </p>
               </div>
-              <button
-                onClick={() => { setEditingClient(undefined); setShowClientModal(true); }}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all"
-              >
-                <Plus className="w-4 h-4" />Soglia CPL
-              </button>
+              <div className="flex items-center gap-3">
+                <PeriodoSelector
+                  available={availablePeriods}
+                  selected={selectedPeriodo}
+                  onChange={setSelectedPeriodo}
+                />
+                <button
+                  onClick={() => { setEditingClient(undefined); setShowClientModal(true); }}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all"
+                >
+                  <Plus className="w-4 h-4" />Soglia CPL
+                </button>
+              </div>
             </header>
 
             {clientGroups.length === 0 ? (
               <div className="flex flex-col items-center gap-3 text-zinc-500 py-24">
                 <TrendingUp className="w-12 h-12 opacity-20" />
-                <p>Nessun dato ancora. Make.com aggiungerà le campagne automaticamente.</p>
+                <p>
+                  {selectedPeriodo === 'oggi'
+                    ? 'Dati giornalieri non ancora disponibili.'
+                    : 'Nessun dato ancora. Make.com aggiungerà le campagne automaticamente.'}
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -551,7 +642,8 @@ export default function Dashboard() {
                             >
                               <div className="px-6 py-4 space-y-2">
                                 <p className="text-sm font-semibold text-zinc-300 mb-3">
-                                  Campagne ({g.campagne.length}) · ultimi 30 giorni
+                                  Campagne ({g.campagne.length}) · {selectedPeriodo === 'oggi' ? 'oggi' : 'ultimi 30 giorni'}
+                                  <span className="text-xs font-normal text-zinc-500 ml-2">— passa il mouse sulla campagna per aprirla in Meta</span>
                                 </p>
                                 {g.campagne.map((row, i) => (
                                   <CampaignRow key={i} row={row} />
@@ -597,6 +689,10 @@ export default function Dashboard() {
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Aggiornamento</span>
                     <span>Ogni ora</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Periodo attivo</span>
+                    <span className="capitalize">{PERIODO_LABELS[selectedPeriodo] ?? selectedPeriodo}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Clienti nel sheet</span>
