@@ -11,12 +11,12 @@ const ACCOUNTS = [
   { id: 'act_728778909246899',    name: 'PMF' },
   { id: 'act_378472188256400',    name: 'Bar Nol' },
   { id: 'act_369452318493607',    name: 'PAR' },
-  { id: 'act_12857033325167443',  name: 'PAA' },
-  { id: 'act_1431982563684600',   name: 'Dott Sante Vass' },
-  { id: 'act_2433348606699494',   name: 'Part Exp' },
+  { id: 'act_1285703325167443',   name: 'PAA' },           // fix: era 12857033325167443
+  { id: 'act_1431982563684605',   name: 'Dott Sante Vass' }, // fix: era 1431982563684600
+  { id: 'act_777606880847637',    name: 'Part Exp' },      // fix: Partenope Experience
   { id: 'act_10282929749335585',  name: 'RR' },
   { id: 'act_1357284689000232',   name: 'Asd Sp' },
-  { id: 'act_987654321',          name: 'Drive' }
+  { id: 'act_135241018772815',    name: 'Cesena Sub' },    // nuovo
 ];
 
 export const handler = async (event) => {
