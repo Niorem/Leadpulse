@@ -314,7 +314,9 @@ function CampaignRow({ row }: { row: SheetRow }) {
           {row.stato && <span className="text-xs text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">{row.stato}</span>}
         </div>
         <p className="text-xs text-zinc-500 mt-1 font-mono">
-          {formatNumber(row.lead)} lead · {formatCurrency(row.spesa)} · CPL {formatCurrency(cpl)}
+          {row.cliente === 'Vyda'
+            ? `${formatNumber(row.lead)} vendite · ${formatCurrency(row.spesa)} · CPV ${formatCurrency(cpl)}`
+            : `${formatNumber(row.lead)} lead · ${formatCurrency(row.spesa)} · CPL ${formatCurrency(cpl)}`}
           {row.dataDa ? ` · ${row.dataDa} → ${row.dataA}` : ''}
         </p>
       </div>
@@ -371,7 +373,10 @@ function ClientTable({
                     <div className="font-semibold">{g.cliente}</div>
                     <div className="text-xs text-zinc-500">{g.campagne.length} campagne</div>
                   </td>
-                  <td className="px-6 py-4 font-mono">{formatNumber(g.lead)}</td>
+                  <td className="px-6 py-4 font-mono">
+                    {formatNumber(g.lead)}
+                    {g.cliente === 'Vyda' && <span className="text-zinc-500 text-xs ml-1">(vendite)</span>}
+                  </td>
                   <td className="px-6 py-4 font-mono">{formatCurrency(g.spesa)}</td>
                   <td className="px-6 py-4 font-mono font-semibold">{formatCurrency(g.cpl)}</td>
                   <td className="px-6 py-4 text-zinc-400 font-mono">
@@ -763,7 +768,9 @@ export default function Dashboard() {
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold">{g.cliente}</p>
                         <p className="text-xs text-zinc-500">
-                          {formatNumber(g.lead)} lead · {formatCurrency(g.spesa)} · CPL {formatCurrency(g.cpl)}
+                          {g.cliente === 'Vyda'
+                            ? `${formatNumber(g.lead)} vendite · ${formatCurrency(g.spesa)} · CPV ${formatCurrency(g.cpl)}`
+                            : `${formatNumber(g.lead)} lead · ${formatCurrency(g.spesa)} · CPL ${formatCurrency(g.cpl)}`}
                           {threshold !== null ? ` · Soglia: ${formatCurrency(threshold)}` : ' · Nessuna soglia'}
                         </p>
                       </div>

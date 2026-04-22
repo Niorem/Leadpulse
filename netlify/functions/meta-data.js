@@ -63,8 +63,10 @@ export const handler = async (event) => {
       if (!data.data) return; // 403 o account senza dati
 
       for (const c of data.data) {
+        const isVyda = account.name === 'Vyda';
         const leadVal = c.actions?.find(a => a.action_type === 'lead')?.value;
-        const lead = parseFloat(leadVal) || 0;
+        const purchaseVal = c.actions?.find(a => ['purchase', 'omni_purchase'].includes(a.action_type))?.value;
+        const lead = isVyda ? (parseFloat(purchaseVal) || 0) : (parseFloat(leadVal) || 0);
         const spesa = parseFloat(c.spend) || 0;
         results.push({
           campagna:    c.campaign_name || '',
