@@ -490,7 +490,20 @@ export default function Dashboard() {
     g.cliente.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Etichetta breve per KPI e intestazioni tabella
   const periodoLabel = mode === 'mensile' ? '30gg' : mode === 'ieri' ? 'ieri' : `${appliedFrom}→${appliedTo}`;
+
+  // Etichetta estesa con date reali (visibile nell'header)
+  const ieriDate = format(subDays(new Date(), 1), 'dd/MM/yyyy', { locale: it });
+  const periodoDisplay = mode === 'mensile'
+    ? dateRange.from
+      ? `Ultimi 30 giorni: ${dateRange.from} → ${dateRange.to}`
+      : 'Ultimi 30 giorni'
+    : mode === 'ieri'
+    ? `Ieri: ${ieriDate}`
+    : appliedFrom && appliedTo
+    ? `Periodo: ${appliedFrom.split('-').reverse().join('/')} → ${appliedTo.split('-').reverse().join('/')}`
+    : 'Seleziona un intervallo';
 
   const handleApplyCustom = () => {
     if (customFrom && customTo) {
@@ -613,9 +626,9 @@ export default function Dashboard() {
                   </h1>
                   <p className="text-zinc-400 text-sm mt-1">
                     Campagne Meta Ads — {format(new Date(), 'd MMMM yyyy', { locale: it })}
-                    {dateRange.from && (
-                      <span className="ml-2 text-zinc-600">· {dateRange.from} → {dateRange.to}</span>
-                    )}
+                  </p>
+                  <p className="text-sm mt-1 font-medium text-blue-400">
+                    📅 {periodoDisplay}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
