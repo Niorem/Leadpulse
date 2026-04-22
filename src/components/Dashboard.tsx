@@ -577,7 +577,7 @@ export default function Dashboard() {
         <div className="mb-6 px-3 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
           <div className="flex items-center gap-2 mb-1">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-            <span className="text-xs font-semibold text-emerald-400">Auto · ogni ora</span>
+            <span className="text-xs font-semibold text-emerald-400">Auto · ogni giorno alle 02:00</span>
           </div>
           {sheet.lastUpdate && <p className="text-xs text-zinc-500 leading-tight">Ultimo sync: {sheet.lastUpdate}</p>}
         </div>
@@ -860,7 +860,7 @@ export default function Dashboard() {
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
                 <h3 className="font-semibold mb-3 text-sm text-zinc-400 uppercase tracking-wider">Fonte dati</h3>
                 <div className="text-sm text-zinc-300 space-y-2">
-                  <div className="flex justify-between"><span className="text-zinc-500">Aggiornamento sheet</span><span>Ogni ora</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-500">Aggiornamento sheet</span><span>ogni giorno alle 02:00</span></div>
                   <div className="flex justify-between"><span className="text-zinc-500">Ultimo sync</span><span className="text-xs">{sheet.lastUpdate}</span></div>
                   <div className="flex justify-between"><span className="text-zinc-500">Clienti attivi</span><span>{sheet.clientGroups.length}</span></div>
                   <div className="flex justify-between"><span className="text-zinc-500">Campagne (30gg)</span><span>{sheet.rows.length}</span></div>
@@ -872,7 +872,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 text-xs text-zinc-400 flex-wrap">
                   <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded-lg font-medium">Meta Ads API</span>
                   <span className="text-zinc-600">→</span>
-                  <span className="bg-zinc-700 px-2 py-1 rounded-lg">Make.com (ogni ora)</span>
+                  <span className="bg-zinc-700 px-2 py-1 rounded-lg">Make.com (ogni giorno alle 02:00)</span>
                   <span className="text-zinc-600">→</span>
                   <span className="bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-lg font-medium">Google Sheets</span>
                   <span className="text-zinc-600">→</span>
