@@ -65,12 +65,10 @@ export const handler = async (event) => {
       for (const c of data.data) {
         const isVyda = account.name === 'Vyda';
         const leadVal = c.actions?.find(a => a.action_type === 'lead')?.value;
-        // Vyda: somma tutte le conversioni di vendita — match largo su qualsiasi action_type
-        // che contenga "purchase" (copre pixel, omni, custom, onsite, ecc.)
+        // Vyda: solo offsite_conversion.fb_pixel_purchase = "Acquisti sul sito web"
+        // NON sommare più tipi: si sovrappongono e causano doppio conteggio
         const purchaseVal = isVyda
-          ? (c.actions || [])
-              .filter(a => a.action_type.toLowerCase().includes('purchase'))
-              .reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0)
+          ? parseFloat(c.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value) || 0
           : null;
         const lead = isVyda ? purchaseVal : (parseFloat(leadVal) || 0);
         const spesa = parseFloat(c.spend) || 0;
