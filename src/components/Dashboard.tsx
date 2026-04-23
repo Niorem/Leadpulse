@@ -191,7 +191,7 @@ function PeriodoBar({
   );
 }
 
-// ─── Hook: dati on-demand da Meta API ────────────────────────────────────────
+// ─── Helper: preset Meta API ─────────────────────────────────────────────────
 function getMetaPreset(mode: PeriodoMode): string | undefined {
   const map: Record<PeriodoMode, string | undefined> = {
     ieri: 'yesterday', last_7d: 'last_7d', last_14d: 'last_14d', last_30d: 'last_30d', custom: undefined,
@@ -208,6 +208,7 @@ function getPresetDates(mode: PeriodoMode): { from: string; to: string } | null 
   return null;
 }
 
+// ─── Hook: dati on-demand da Meta API ────────────────────────────────────────
 function buildClientGroups(rows: SheetRow[]): ClientGroup[] {
   const groupMap = new Map<string, ClientGroup>();
   for (const row of rows) {
@@ -262,74 +263,97 @@ function useMetaData(preset?: string, from?: string, to?: string) {
   return { rows, clientGroups, loading, error, dateRange, refresh: fetch_ };
 }
 
-// ─── Modal: Nuovo / Modifica Cliente ─────────────────────────────────────────
-function ClientModal({ client, onClose }: { client?: Client; onClose: () => void }) {
-  const [form, setForm] = useState({
-    name: client?.name || '',
-    referent: client?.referent || '',
-    email: client?.email || '',
-    cplThreshold: client?.cplThreshold?.toString() || '',
-    active: client?.active ?? true,
-  });
+// ─── Modal: Soglia CPL per cliente ───────────────────────────────────────────
+function ClientModal({
+  clienteName, firestoreClient, onClose,
+}: {
+  clienteName: string;
+  firestoreClient?: Client;
+  onClose: () => void;
+}) {
+  const [cplThreshold, setCplThreshold] = useState(firestoreClient?.cplThreshold?.toString() || '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
   const save = async () => {
-    if (!form.name.trim()) { setError('Il nome cliente è obbligatorio'); return; }
-    if (!form.cplThreshold || isNaN(Number(form.cplThreshold))) { setError('Soglia CPL non valida'); return; }
+    if (!cplThreshold || isNaN(Number(cplThreshold)) || Number(cplThreshold) < 0) {
+      setError('Inserisci un valore valido'); return;
+    }
     setSaving(true);
     try {
-      const data = {
-        name: form.name.trim(),
-        referent: form.referent.trim(),
-        email: form.email.trim(),
-        cplThreshold: parseFloat(form.cplThreshold),
-        active: form.active,
-      };
-      if (client) {
-        await updateDoc(doc(db, 'clients', client.id), data);
+      if (firestoreClient) {
+        await updateDoc(doc(db, 'clients', firestoreClient.id), { cplThreshold: parseFloat(cplThreshold) });
       } else {
-        await addDoc(collection(db, 'clients'), data);
+        await addDoc(collection(db, 'clients'), { name: clienteName, cplThreshold: parseFloat(cplThreshold), active: true });
       }
       onClose();
     } catch (e: any) {
-      setError('Errore: ' + (e?.message || 'Controlla le regole Firestore'));
+      setError('Errore: ' + (e?.message || 'Riprova'));
     } finally {
       setSaving(false);
     }
   };
 
+  const remove = async () => {
+    if (!firestoreClient) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'clients', firestoreClient.id));
+      onClose();
+    } catch (e: any) {
+      setError('Errore eliminazione');
+      setDeleting(false);
+    }
+  };
+
   return (
     <Overlay onClose={onClose}>
-      <h2 className="text-xl font-bold mb-6 pr-8">{client ? 'Modifica Cliente' : 'Nuovo Cliente'}</h2>
-      <p className="text-zinc-400 text-sm mb-5">
-        Il nome cliente deve corrispondere esattamente alla colonna "Cliente" nel Google Sheet.
-      </p>
-      {error && <p className="text-rose-400 text-sm mb-4 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
-      <div className="space-y-4">
-        <Field label="Nome cliente *">
-          <input className={inputCls} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Es. Galullo, FCC, SVD..." />
-        </Field>
-        <Field label="Referente">
-          <input className={inputCls} value={form.referent} onChange={e => setForm(f => ({ ...f, referent: e.target.value }))} placeholder="Mario Rossi" />
-        </Field>
-        <Field label="Email">
-          <input className={inputCls} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="mario@azienda.it" />
-        </Field>
-        <Field label="Soglia CPL (€) *">
-          <input className={inputCls} type="number" min="0" step="0.01" value={form.cplThreshold}
-            onChange={e => setForm(f => ({ ...f, cplThreshold: e.target.value }))} placeholder="15.00" />
-        </Field>
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setForm(f => ({ ...f, active: !f.active }))}>
-          <div className={cn('w-10 h-6 rounded-full transition-colors relative flex-shrink-0', form.active ? 'bg-blue-600' : 'bg-zinc-700')}>
-            <div className={cn('absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all', form.active ? 'left-5' : 'left-1')} />
-          </div>
-          <span className="text-sm text-zinc-300">Cliente attivo</span>
+      <div className="flex items-center gap-3 mb-5 pr-8">
+        <div className="w-9 h-9 bg-blue-600/20 rounded-xl flex items-center justify-center flex-shrink-0">
+          <TrendingUp className="w-4 h-4 text-blue-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold leading-tight">{clienteName}</h2>
+          <p className="text-xs text-zinc-500">
+            {firestoreClient ? 'Modifica soglia CPL' : 'Imposta soglia CPL'}
+          </p>
         </div>
       </div>
-      <div className="flex gap-3 mt-6">
-        <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-all">Annulla</button>
-        <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all disabled:opacity-50">
+
+      {error && <p className="text-rose-400 text-sm mb-4 bg-rose-500/10 rounded-xl px-3 py-2">{error}</p>}
+
+      <Field label="Soglia CPL (€)">
+        <input
+          className={inputCls}
+          type="number" min="0" step="0.01"
+          value={cplThreshold}
+          onChange={e => setCplThreshold(e.target.value)}
+          placeholder="es. 15.00"
+          autoFocus
+          onKeyDown={e => e.key === 'Enter' && save()}
+        />
+      </Field>
+
+      <div className="flex gap-2 mt-6">
+        {firestoreClient && (
+          <button
+            onClick={remove}
+            disabled={deleting}
+            className="px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Trash2 className="w-4 h-4" />
+            {deleting ? '...' : 'Elimina'}
+          </button>
+        )}
+        <button onClick={onClose} className="flex-1 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-sm font-medium transition-all">
+          Annulla
+        </button>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-all disabled:opacity-50"
+        >
           {saving ? 'Salvataggio...' : 'Salva'}
         </button>
       </div>
@@ -384,7 +408,7 @@ function CampaignRow({ row }: { row: SheetRow }) {
 
 // ─── Tabella clienti riutilizzabile ───────────────────────────────────────────
 function ClientTable({
-  groups, getThreshold, getStatus, periodoLabel, onDetail, onMoveUp, onMoveDown,
+  groups, getThreshold, getStatus, periodoLabel, onDetail, onMoveUp, onMoveDown, onThreshold,
 }: {
   groups: ClientGroup[];
   getThreshold: (n: string) => number | null;
@@ -393,6 +417,7 @@ function ClientTable({
   onDetail: (cliente: string) => void;
   onMoveUp: (cliente: string) => void;
   onMoveDown: (cliente: string) => void;
+  onThreshold: (cliente: string) => void;
 }) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
@@ -411,21 +436,39 @@ function ClientTable({
               const status = getStatus(g);
               return (
                 <tr key={g.cliente} className="hover:bg-zinc-800/40 transition-colors">
+                  {/* Frecce reordering */}
                   <td className="pl-3 pr-1 py-4">
                     <div className="flex flex-col gap-0.5">
-                      <button onClick={() => onMoveUp(g.cliente)} disabled={idx === 0}
-                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors" title="Sposta su">
+                      <button
+                        onClick={() => onMoveUp(g.cliente)}
+                        disabled={idx === 0}
+                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                        title="Sposta su"
+                      >
                         <ArrowUp className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => onMoveDown(g.cliente)} disabled={idx === groups.length - 1}
-                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors" title="Sposta giù">
+                      <button
+                        onClick={() => onMoveDown(g.cliente)}
+                        disabled={idx === groups.length - 1}
+                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                        title="Sposta giù"
+                      >
                         <ArrowDown className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
                   <td className="px-4 py-4">
-                    <div className="font-semibold">{g.cliente}</div>
-                    <div className="text-xs text-zinc-500">{g.campagne.length} campagne</div>
+                    <button
+                      onClick={() => onThreshold(g.cliente)}
+                      className="text-left group/name"
+                      title="Imposta/modifica soglia CPL"
+                    >
+                      <div className="font-semibold group-hover/name:text-blue-400 transition-colors flex items-center gap-1.5">
+                        {g.cliente}
+                        <Pencil className="w-3 h-3 text-zinc-600 group-hover/name:text-blue-400 opacity-0 group-hover/name:opacity-100 transition-all" />
+                      </div>
+                      <div className="text-xs text-zinc-500">{g.campagne.length} campagne</div>
+                    </button>
                   </td>
                   <td className="px-4 py-4 font-mono">
                     {formatNumber(g.lead)}
@@ -438,8 +481,11 @@ function ClientTable({
                   </td>
                   <td className="px-4 py-4"><StatusBadge status={status} /></td>
                   <td className="px-4 py-4 text-right">
-                    <button onClick={() => onDetail(g.cliente)}
-                      className="p-2 text-zinc-500 hover:text-zinc-100 transition-all" title="Dettaglio campagne">
+                    <button
+                      onClick={() => onDetail(g.cliente)}
+                      className="p-2 text-zinc-500 hover:text-zinc-100 transition-all"
+                      title="Dettaglio campagne"
+                    >
                       <ArrowUpRight className="w-5 h-5" />
                     </button>
                   </td>
@@ -462,8 +508,10 @@ export default function Dashboard() {
 
   // Periodo — default "ieri"
   const [mode, setMode] = useState<PeriodoMode>('ieri');
+  // Calendario: sempre visibile, aggiornato al preset selezionato
   const [calFrom, setCalFrom] = useState(() => format(subDays(new Date(), 1), 'yyyy-MM-dd'));
   const [calTo,   setCalTo]   = useState(() => format(subDays(new Date(), 1), 'yyyy-MM-dd'));
+  // Date applicate (solo in modalità custom)
   const [appliedFrom, setAppliedFrom] = useState('');
   const [appliedTo,   setAppliedTo]   = useState('');
 
@@ -495,26 +543,7 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showClientModal, setShowClientModal] = useState(false);
-  const [editingClient, setEditingClient] = useState<Client | undefined>();
-  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
-
-  const handleDeleteClient = async (clientId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (deletingClientId === clientId) {
-      // Seconda pressione → conferma eliminazione
-      try {
-        await deleteDoc(doc(db, 'clients', clientId));
-      } catch (err) {
-        console.error('Errore eliminazione:', err);
-      } finally {
-        setDeletingClientId(null);
-      }
-    } else {
-      // Prima pressione → chiedi conferma
-      setDeletingClientId(clientId);
-    }
-  };
+  const [thresholdModal, setThresholdModal] = useState<{ name: string } | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -603,6 +632,7 @@ export default function Dashboard() {
   const moveClient = (name: string, dir: 'up' | 'down') => {
     setClientOrder(prev => {
       const base = prev.length > 0 ? prev : clientGroups.map(g => g.cliente);
+      // Aggiungi eventuali nuovi clienti non ancora nell'ordine
       const allNames = clientGroups.map(g => g.cliente);
       const full = [...base, ...allNames.filter(n => !base.includes(n))];
       const idx = full.indexOf(name);
@@ -809,6 +839,7 @@ export default function Dashboard() {
                 onDetail={c => { setView('clients'); setExpandedClient(c); }}
                 onMoveUp={n => moveClient(n, 'up')}
                 onMoveDown={n => moveClient(n, 'down')}
+                onThreshold={n => setThresholdModal({ name: n })}
               />
             )}
 
@@ -824,17 +855,9 @@ export default function Dashboard() {
         {view === 'clients' && (
           <>
             <header className="flex flex-col gap-4 mb-8">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h1 className="text-2xl font-bold">Soglie CPL & Dettaglio Campagne</h1>
-                  <p className="text-zinc-400 text-sm">{clientGroups.length} clienti · {periodoLabel}</p>
-                </div>
-                <button
-                  onClick={() => { setEditingClient(undefined); setShowClientModal(true); }}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-medium transition-all"
-                >
-                  <Plus className="w-4 h-4" />Soglia CPL
-                </button>
+              <div>
+                <h1 className="text-2xl font-bold">Soglie CPL & Dettaglio Campagne</h1>
+                <p className="text-zinc-400 text-sm">{clientGroups.length} clienti · {periodoLabel} · clicca su un cliente per impostare la soglia</p>
               </div>
               {periodoBar}
             </header>
@@ -847,74 +870,46 @@ export default function Dashboard() {
             )}
 
             <div className="space-y-2">
-              {clientGroups.map(g => {
+              {orderedGroups.map(g => {
                 const isExpanded = expandedClient === g.cliente;
                 const threshold = getThreshold(g.cliente);
                 const status = getStatus(g);
-                const firestoreClient = clients.find(c =>
-                  c.name.toLowerCase() === g.cliente.toLowerCase() ||
-                  c.name.toLowerCase().includes(g.cliente.toLowerCase())
-                );
 
                 return (
                   <div key={g.cliente} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-                    <div
-                      className="flex items-center gap-4 px-6 py-4 cursor-pointer hover:bg-zinc-800/40 transition-colors"
-                      onClick={() => setExpandedClient(isExpanded ? null : g.cliente)}
-                    >
+                    <div className="flex items-center gap-4 px-6 py-4">
                       <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold">{g.cliente}</p>
+
+                      {/* Nome cliente — clicca per soglia */}
+                      <button
+                        className="flex-1 min-w-0 text-left group/cname"
+                        onClick={() => setThresholdModal({ name: g.cliente })}
+                        title="Imposta/modifica soglia CPL"
+                      >
+                        <p className="font-semibold group-hover/cname:text-blue-400 transition-colors flex items-center gap-1.5">
+                          {g.cliente}
+                          <Pencil className="w-3 h-3 text-zinc-600 group-hover/cname:text-blue-400 opacity-0 group-hover/cname:opacity-100 transition-all" />
+                        </p>
                         <p className="text-xs text-zinc-500">
                           {g.cliente === 'Vyda'
                             ? `${formatNumber(g.lead)} vendite · ${formatCurrency(g.spesa)} · CPV ${formatCurrency(g.cpl)}`
                             : `${formatNumber(g.lead)} lead · ${formatCurrency(g.spesa)} · CPL ${formatCurrency(g.cpl)}`}
-                          {threshold !== null ? ` · Soglia: ${formatCurrency(threshold)}` : ' · Nessuna soglia'}
+                          {threshold !== null
+                            ? <span className="text-emerald-400"> · Soglia: {formatCurrency(threshold)}</span>
+                            : <span className="text-zinc-600"> · Nessuna soglia</span>}
                         </p>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
+                      </button>
+
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         <StatusBadge status={status} />
-                        {firestoreClient ? (
-                          deletingClientId === firestoreClient.id ? (
-                            /* Conferma eliminazione */
-                            <div className="flex items-center gap-1 bg-rose-500/10 border border-rose-500/30 rounded-xl px-2 py-1" onClick={e => e.stopPropagation()}>
-                              <span className="text-xs text-rose-400 font-medium mr-1">Elimina?</span>
-                              <button
-                                onClick={e => handleDeleteClient(firestoreClient.id, e)}
-                                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-medium transition-all"
-                              >Sì</button>
-                              <button
-                                onClick={e => { e.stopPropagation(); setDeletingClientId(null); }}
-                                className="px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg text-xs font-medium transition-all"
-                              >No</button>
-                            </div>
-                          ) : (
-                            <>
-                              <button
-                                title="Modifica soglia"
-                                onClick={e => { e.stopPropagation(); setEditingClient(firestoreClient); setShowClientModal(true); }}
-                                className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                title="Elimina soglia"
-                                onClick={e => handleDeleteClient(firestoreClient.id, e)}
-                                className="p-1.5 text-zinc-500 hover:text-rose-400 transition-all"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
-                          )
-                        ) : (
-                          <button
-                            onClick={e => { e.stopPropagation(); setEditingClient(undefined); setShowClientModal(true); }}
-                            className="px-2 py-1 text-xs text-blue-400 bg-blue-500/10 rounded-lg"
-                          >
-                            + Soglia
-                          </button>
-                        )}
-                        {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronRightIcon className="w-4 h-4 text-zinc-400" />}
+                        {/* Expand campagne */}
+                        <button
+                          onClick={() => setExpandedClient(isExpanded ? null : g.cliente)}
+                          className="p-1.5 text-zinc-500 hover:text-zinc-100 transition-all"
+                          title="Vedi campagne"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 
@@ -993,10 +988,15 @@ export default function Dashboard() {
       </main>
 
       <AnimatePresence>
-        {showClientModal && (
+        {thresholdModal && (
           <ClientModal
-            client={editingClient}
-            onClose={() => { setShowClientModal(false); setEditingClient(undefined); }}
+            clienteName={thresholdModal.name}
+            firestoreClient={clients.find(c =>
+              c.name.toLowerCase() === thresholdModal.name.toLowerCase() ||
+              c.name.toLowerCase().includes(thresholdModal.name.toLowerCase()) ||
+              thresholdModal.name.toLowerCase().includes(c.name.toLowerCase())
+            )}
+            onClose={() => setThresholdModal(null)}
           />
         )}
       </AnimatePresence>
