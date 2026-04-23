@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Client, Campaign } from '../types';
@@ -8,7 +8,7 @@ import {
   Users, TrendingUp, AlertCircle, CheckCircle2, Clock, Download,
   Plus, ArrowUpRight, Search, LayoutDashboard, Settings, LogOut, X,
   ChevronDown, ChevronRight, Pencil, BarChart2, RefreshCw, Zap,
-  ExternalLink, Calendar, ChevronLeft, ChevronRight as ChevronRightIcon, Trash2,
+  ExternalLink, Calendar, ChevronLeft, ChevronRight as ChevronRightIcon, Trash2, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
@@ -18,7 +18,7 @@ import * as XLSX from 'xlsx';
 
 type View = 'dashboard' | 'clients' | 'settings';
 type AlertSeverity = 'OK' | 'WARNING' | 'CRITICAL';
-type PeriodoMode = 'mensile' | 'ieri' | 'custom';
+type PeriodoMode = 'ieri' | 'last_7d' | 'last_14d' | 'last_30d' | 'custom';
 
 // ─── Helpers UI ───────────────────────────────────────────────────────────────
 
@@ -70,24 +70,28 @@ function StatusBadge({ status }: { status: AlertSeverity }) {
 
 // ─── Selettore periodo + date range ──────────────────────────────────────────
 function DateInput({
-  label, value, min, max, onChange,
+  label, value, min, max, onChange, disabled,
 }: {
   label: string; value: string; min?: string; max?: string;
-  onChange: (v: string) => void;
+  onChange: (v: string) => void; disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider px-1">{label}</span>
-      <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:border-blue-500 focus-within:border-blue-500 rounded-xl px-3 py-2 transition-colors">
+      <div className={cn(
+        "flex items-center gap-1.5 bg-zinc-800 border rounded-xl px-3 py-2 transition-colors",
+        disabled ? "border-zinc-800 opacity-60" : "border-zinc-700 hover:border-blue-500 focus-within:border-blue-500"
+      )}>
         <Calendar className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
         <input
           type="date"
           min={min}
           max={max}
           value={value}
+          disabled={disabled}
           onChange={e => onChange(e.target.value)}
           style={{ colorScheme: 'dark' }}
-          className="bg-transparent text-zinc-200 text-xs font-mono outline-none cursor-pointer w-[110px]"
+          className="bg-transparent text-zinc-200 text-xs font-mono outline-none cursor-pointer w-[110px] disabled:cursor-default"
         />
       </div>
     </div>
@@ -96,65 +100,85 @@ function DateInput({
 
 function PeriodoBar({
   mode, onMode,
-  customFrom, customTo,
-  onCustomFrom, onCustomTo,
+  calFrom, calTo,
+  onCalFrom, onCalTo,
   onApply,
 }: {
   mode: PeriodoMode;
   onMode: (m: PeriodoMode) => void;
-  customFrom: string;
-  customTo: string;
-  onCustomFrom: (v: string) => void;
-  onCustomTo: (v: string) => void;
+  calFrom: string;
+  calTo: string;
+  onCalFrom: (v: string) => void;
+  onCalTo: (v: string) => void;
   onApply: () => void;
 }) {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const isPreset = mode !== 'custom';
+
+  const presets: { id: PeriodoMode; label: string }[] = [
+    { id: 'ieri',     label: 'Ieri' },
+    { id: 'last_7d',  label: '7 giorni' },
+    { id: 'last_14d', label: '14 giorni' },
+    { id: 'last_30d', label: '30 giorni' },
+  ];
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {/* Tab preset */}
+    <div className="flex flex-wrap items-end gap-2">
+      {/* Bottoni preset */}
       <div className="flex items-center gap-1 bg-zinc-800 rounded-xl p-1">
-        {(['mensile', 'ieri', 'custom'] as PeriodoMode[]).map(m => (
+        {presets.map(p => (
           <button
-            key={m}
-            onClick={() => onMode(m)}
+            key={p.id}
+            onClick={() => onMode(p.id)}
             className={cn(
-              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5',
-              mode === m ? 'bg-blue-600 text-white shadow' : 'text-zinc-300 hover:bg-zinc-700'
+              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+              mode === p.id ? 'bg-blue-600 text-white shadow' : 'text-zinc-300 hover:bg-zinc-700'
             )}
           >
-            {m === 'custom' && <Calendar className="w-3 h-3" />}
-            {m === 'mensile' ? '30 giorni' : m === 'ieri' ? 'Ieri' : 'Personalizzato'}
+            {p.label}
           </button>
         ))}
+        <button
+          onClick={() => onMode('custom')}
+          className={cn(
+            'px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5',
+            mode === 'custom' ? 'bg-blue-600 text-white shadow' : 'text-zinc-300 hover:bg-zinc-700'
+          )}
+        >
+          <Calendar className="w-3 h-3" />
+          Personalizzato
+        </button>
       </div>
 
-      {/* Date picker inline quando custom */}
+      {/* Calendario — sempre visibile, read-only per i preset */}
+      <DateInput
+        label="Dal"
+        value={calFrom}
+        max={calTo || todayStr}
+        onChange={onCalFrom}
+        disabled={isPreset}
+      />
+      <span className="text-zinc-600 text-xs mb-2.5">→</span>
+      <DateInput
+        label="Al"
+        value={calTo}
+        min={calFrom}
+        max={todayStr}
+        onChange={onCalTo}
+        disabled={isPreset}
+      />
+
+      {/* Bottone Cerca solo in modalità custom */}
       <AnimatePresence>
         {mode === 'custom' && (
           <motion.div
-            initial={{ opacity: 0, x: -8 }}
+            initial={{ opacity: 0, x: -6 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -8 }}
-            className="flex flex-wrap items-end gap-2"
+            exit={{ opacity: 0, x: -6 }}
           >
-            <DateInput
-              label="Dal"
-              value={customFrom}
-              max={customTo || todayStr}
-              onChange={onCustomFrom}
-            />
-            <span className="text-zinc-600 text-xs mb-2.5">→</span>
-            <DateInput
-              label="Al"
-              value={customTo}
-              min={customFrom}
-              max={todayStr}
-              onChange={onCustomTo}
-            />
             <button
               onClick={onApply}
-              disabled={!customFrom || !customTo}
+              disabled={!calFrom || !calTo}
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5"
             >
               <Search className="w-3 h-3" />
@@ -168,6 +192,22 @@ function PeriodoBar({
 }
 
 // ─── Hook: dati on-demand da Meta API ────────────────────────────────────────
+function getMetaPreset(mode: PeriodoMode): string | undefined {
+  const map: Record<PeriodoMode, string | undefined> = {
+    ieri: 'yesterday', last_7d: 'last_7d', last_14d: 'last_14d', last_30d: 'last_30d', custom: undefined,
+  };
+  return map[mode];
+}
+
+function getPresetDates(mode: PeriodoMode): { from: string; to: string } | null {
+  const yesterday = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+  if (mode === 'ieri')     return { from: yesterday, to: yesterday };
+  if (mode === 'last_7d')  return { from: format(subDays(new Date(), 7), 'yyyy-MM-dd'),  to: yesterday };
+  if (mode === 'last_14d') return { from: format(subDays(new Date(), 14), 'yyyy-MM-dd'), to: yesterday };
+  if (mode === 'last_30d') return { from: format(subDays(new Date(), 30), 'yyyy-MM-dd'), to: yesterday };
+  return null;
+}
+
 function buildClientGroups(rows: SheetRow[]): ClientGroup[] {
   const groupMap = new Map<string, ClientGroup>();
   for (const row of rows) {
@@ -344,13 +384,15 @@ function CampaignRow({ row }: { row: SheetRow }) {
 
 // ─── Tabella clienti riutilizzabile ───────────────────────────────────────────
 function ClientTable({
-  groups, getThreshold, getStatus, periodoLabel, onDetail,
+  groups, getThreshold, getStatus, periodoLabel, onDetail, onMoveUp, onMoveDown,
 }: {
   groups: ClientGroup[];
   getThreshold: (n: string) => number | null;
   getStatus: (g: ClientGroup) => AlertSeverity;
   periodoLabel: string;
   onDetail: (cliente: string) => void;
+  onMoveUp: (cliente: string) => void;
+  onMoveDown: (cliente: string) => void;
 }) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
@@ -358,37 +400,46 @@ function ClientTable({
         <table className="w-full text-left">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-800/30">
-              {['Cliente', `Lead (${periodoLabel})`, `Spesa (${periodoLabel})`, 'CPL', 'Soglia', 'Stato', ''].map(h => (
-                <th key={h} className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              {['', 'Cliente', `Lead (${periodoLabel})`, `Spesa (${periodoLabel})`, 'CPL', 'Soglia', 'Stato', ''].map((h, i) => (
+                <th key={i} className="px-4 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
-            {groups.map(g => {
+            {groups.map((g, idx) => {
               const threshold = getThreshold(g.cliente);
               const status = getStatus(g);
               return (
                 <tr key={g.cliente} className="hover:bg-zinc-800/40 transition-colors">
-                  <td className="px-6 py-4">
+                  <td className="pl-3 pr-1 py-4">
+                    <div className="flex flex-col gap-0.5">
+                      <button onClick={() => onMoveUp(g.cliente)} disabled={idx === 0}
+                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors" title="Sposta su">
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => onMoveDown(g.cliente)} disabled={idx === groups.length - 1}
+                        className="p-0.5 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 disabled:cursor-not-allowed transition-colors" title="Sposta giù">
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
                     <div className="font-semibold">{g.cliente}</div>
                     <div className="text-xs text-zinc-500">{g.campagne.length} campagne</div>
                   </td>
-                  <td className="px-6 py-4 font-mono">
+                  <td className="px-4 py-4 font-mono">
                     {formatNumber(g.lead)}
                     {g.cliente === 'Vyda' && <span className="text-zinc-500 text-xs ml-1">(vendite)</span>}
                   </td>
-                  <td className="px-6 py-4 font-mono">{formatCurrency(g.spesa)}</td>
-                  <td className="px-6 py-4 font-mono font-semibold">{formatCurrency(g.cpl)}</td>
-                  <td className="px-6 py-4 text-zinc-400 font-mono">
+                  <td className="px-4 py-4 font-mono">{formatCurrency(g.spesa)}</td>
+                  <td className="px-4 py-4 font-mono font-semibold">{formatCurrency(g.cpl)}</td>
+                  <td className="px-4 py-4 text-zinc-400 font-mono">
                     {threshold !== null ? formatCurrency(threshold) : <span className="text-zinc-600">—</span>}
                   </td>
-                  <td className="px-6 py-4"><StatusBadge status={status} /></td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => onDetail(g.cliente)}
-                      className="p-2 text-zinc-500 hover:text-zinc-100 transition-all"
-                      title="Dettaglio campagne"
-                    >
+                  <td className="px-4 py-4"><StatusBadge status={status} /></td>
+                  <td className="px-4 py-4 text-right">
+                    <button onClick={() => onDetail(g.cliente)}
+                      className="p-2 text-zinc-500 hover:text-zinc-100 transition-all" title="Dettaglio campagne">
                       <ArrowUpRight className="w-5 h-5" />
                     </button>
                   </td>
@@ -409,18 +460,23 @@ export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [firestoreLoading, setFirestoreLoading] = useState(true);
 
-  // Periodo
-  const [mode, setMode] = useState<PeriodoMode>('mensile');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  // Periodo — default "ieri"
+  const [mode, setMode] = useState<PeriodoMode>('ieri');
+  const [calFrom, setCalFrom] = useState(() => format(subDays(new Date(), 1), 'yyyy-MM-dd'));
+  const [calTo,   setCalTo]   = useState(() => format(subDays(new Date(), 1), 'yyyy-MM-dd'));
   const [appliedFrom, setAppliedFrom] = useState('');
-  const [appliedTo, setAppliedTo] = useState('');
+  const [appliedTo,   setAppliedTo]   = useState('');
+
+  // Ordinamento clienti (persistito in localStorage)
+  const [clientOrder, setClientOrder] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('lp_client_order') || '[]'); } catch { return []; }
+  });
 
   // Dati da Google Sheet (solo per lastUpdate nella sidebar)
   const sheet = useSheetData('mensile');
 
   // Dati da Meta API — sempre live per tutte le modalità
-  const metaPreset = mode === 'mensile' ? 'last_30d' : mode === 'ieri' ? 'yesterday' : undefined;
+  const metaPreset = mode !== 'custom' ? getMetaPreset(mode) : undefined;
   const metaFrom   = mode === 'custom' ? appliedFrom : undefined;
   const metaTo     = mode === 'custom' ? appliedTo   : undefined;
   const meta = useMetaData(metaPreset, metaFrom, metaTo);
@@ -491,35 +547,72 @@ export default function Dashboard() {
   const totalCPL      = totalLeads > 0 ? totalSpend / totalLeads : 0;
   const criticalCount = clientGroups.filter(g => getStatus(g) === 'CRITICAL').length;
 
-  const filteredGroups = clientGroups.filter(g =>
+  // Applica ordinamento personalizzato, poi filtra per ricerca
+  const orderedGroups = useMemo(() => {
+    if (clientOrder.length === 0) return clientGroups;
+    return [...clientGroups].sort((a, b) => {
+      const ai = clientOrder.indexOf(a.cliente);
+      const bi = clientOrder.indexOf(b.cliente);
+      if (ai === -1 && bi === -1) return b.lead - a.lead;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [clientGroups, clientOrder]);
+
+  const filteredGroups = orderedGroups.filter(g =>
     g.cliente.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Etichetta breve per KPI e intestazioni tabella
-  const periodoLabel = mode === 'mensile' ? '30gg' : mode === 'ieri' ? 'ieri' : `${appliedFrom}→${appliedTo}`;
+  const periodoLabel =
+    mode === 'ieri'     ? 'ieri' :
+    mode === 'last_7d'  ? '7gg' :
+    mode === 'last_14d' ? '14gg' :
+    mode === 'last_30d' ? '30gg' :
+    appliedFrom         ? `${appliedFrom}→${appliedTo}` : 'custom';
 
   // Etichetta estesa con date reali (visibile nell'header)
   const ieriDate = format(subDays(new Date(), 1), 'dd/MM/yyyy', { locale: it });
-  const periodoDisplay = mode === 'mensile'
-    ? dateRange.from
-      ? `Ultimi 30 giorni: ${dateRange.from} → ${dateRange.to}`
-      : 'Ultimi 30 giorni'
-    : mode === 'ieri'
-    ? `Ieri: ${ieriDate}`
-    : appliedFrom && appliedTo
-    ? `Periodo: ${appliedFrom.split('-').reverse().join('/')} → ${appliedTo.split('-').reverse().join('/')}`
-    : 'Seleziona un intervallo';
+  const periodoDisplay =
+    mode === 'ieri'     ? `Ieri: ${ieriDate}` :
+    mode === 'last_7d'  ? (dateRange.from ? `Ultimi 7 giorni: ${dateRange.from} → ${dateRange.to}` : 'Ultimi 7 giorni') :
+    mode === 'last_14d' ? (dateRange.from ? `Ultimi 14 giorni: ${dateRange.from} → ${dateRange.to}` : 'Ultimi 14 giorni') :
+    mode === 'last_30d' ? (dateRange.from ? `Ultimi 30 giorni: ${dateRange.from} → ${dateRange.to}` : 'Ultimi 30 giorni') :
+    (appliedFrom && appliedTo
+      ? `Periodo: ${appliedFrom.split('-').reverse().join('/')} → ${appliedTo.split('-').reverse().join('/')}`
+      : 'Seleziona un intervallo');
 
   const handleApplyCustom = () => {
-    if (customFrom && customTo) {
-      setAppliedFrom(customFrom);
-      setAppliedTo(customTo);
+    if (calFrom && calTo) {
+      setAppliedFrom(calFrom);
+      setAppliedTo(calTo);
     }
   };
 
   const handleModeChange = (m: PeriodoMode) => {
     setMode(m);
-    if (m !== 'custom') { setAppliedFrom(''); setAppliedTo(''); }
+    if (m !== 'custom') {
+      const dates = getPresetDates(m);
+      if (dates) { setCalFrom(dates.from); setCalTo(dates.to); }
+      setAppliedFrom(''); setAppliedTo('');
+    }
+  };
+
+  // Funzione reordering clienti
+  const moveClient = (name: string, dir: 'up' | 'down') => {
+    setClientOrder(prev => {
+      const base = prev.length > 0 ? prev : clientGroups.map(g => g.cliente);
+      const allNames = clientGroups.map(g => g.cliente);
+      const full = [...base, ...allNames.filter(n => !base.includes(n))];
+      const idx = full.indexOf(name);
+      if (idx === -1) return prev;
+      const next = [...full];
+      if (dir === 'up' && idx > 0) [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      if (dir === 'down' && idx < next.length - 1) [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      localStorage.setItem('lp_client_order', JSON.stringify(next));
+      return next;
+    });
   };
 
   const downloadExcel = () => {
@@ -557,8 +650,8 @@ export default function Dashboard() {
   const periodoBar = (
     <PeriodoBar
       mode={mode} onMode={handleModeChange}
-      customFrom={customFrom} customTo={customTo}
-      onCustomFrom={setCustomFrom} onCustomTo={setCustomTo}
+      calFrom={calFrom} calTo={calTo}
+      onCalFrom={setCalFrom} onCalTo={setCalTo}
       onApply={handleApplyCustom}
     />
   );
@@ -576,7 +669,10 @@ export default function Dashboard() {
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
             <TrendingUp className="w-6 h-6 text-white" />
           </div>
-          <span className="text-xl font-bold tracking-tight">LeadPulse</span>
+          <div className="flex flex-col">
+            <span className="text-xl font-bold tracking-tight leading-tight">LeadPulse</span>
+            <span className="text-[10px] text-zinc-500 font-medium leading-tight tracking-wide">by DNA Creative</span>
+          </div>
         </div>
 
         <div className="mb-6 px-3 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
@@ -700,7 +796,7 @@ export default function Dashboard() {
                 <TrendingUp className="w-10 h-10 opacity-30" />
                 <p>
                   {mode === 'custom' && (!appliedFrom || !appliedTo)
-                    ? 'Seleziona un intervallo di date e clicca Applica.'
+                    ? 'Seleziona un intervallo di date e clicca Cerca.'
                     : 'Nessun dato per il periodo selezionato.'}
                 </p>
               </div>
@@ -711,6 +807,8 @@ export default function Dashboard() {
                 getStatus={getStatus}
                 periodoLabel={periodoLabel}
                 onDetail={c => { setView('clients'); setExpandedClient(c); }}
+                onMoveUp={n => moveClient(n, 'up')}
+                onMoveDown={n => moveClient(n, 'down')}
               />
             )}
 
