@@ -46,6 +46,7 @@ export const handler = async (event) => {
       const params = new URLSearchParams({
         fields: 'campaign_id,campaign_name,spend,actions,impressions,clicks,cpm,cpc,date_start,date_stop',
         level: 'campaign',
+        limit: '500',
         access_token: TOKEN,
       });
 
@@ -55,40 +56,45 @@ export const handler = async (event) => {
         params.set('time_range', JSON.stringify({ since: from, until: to }));
       }
 
-      const res = await fetch(
-        `https://graph.facebook.com/v21.0/${account.id}/insights?${params}`
-      );
-      const data = await res.json();
+      // Paginazione: segui paging.next finché ci sono risultati
+      let url = `https://graph.facebook.com/v21.0/${account.id}/insights?${params}`;
+      while (url) {
+        const res = await fetch(url);
+        const data = await res.json();
 
-      if (!data.data) return; // 403 o account senza dati
+        if (!data.data) break; // 403 o account senza dati
 
-      for (const c of data.data) {
-        const isVyda = account.name === 'Vyda';
-        const leadVal = c.actions?.find(a => a.action_type === 'lead')?.value;
-        // Vyda: solo offsite_conversion.fb_pixel_purchase = "Acquisti sul sito web"
-        // NON sommare più tipi: si sovrappongono e causano doppio conteggio
-        const purchaseVal = isVyda
-          ? parseFloat(c.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value) || 0
-          : null;
-        const lead = isVyda ? purchaseVal : (parseFloat(leadVal) || 0);
-        const spesa = parseFloat(c.spend) || 0;
-        results.push({
-          campagna:    c.campaign_name || '',
-          cliente:     account.name,
-          lead,
-          spesa,
-          cpl:         lead > 0 ? spesa / lead : 0,
-          impressioni: parseFloat(c.impressions) || 0,
-          click:       parseFloat(c.clicks) || 0,
-          cpm:         parseFloat(c.cpm) || 0,
-          cpc:         parseFloat(c.cpc) || 0,
-          dataDa:      c.date_start || from || '',
-          dataA:       c.date_stop  || to   || '',
-          stato:       'Attiva',
-          campaignId:  c.campaign_id || '',
-          accountId:   account.id,
-          periodo:     preset || 'custom',
-        });
+        for (const c of data.data) {
+          const isVyda = account.name === 'Vyda';
+          const leadVal = c.actions?.find(a => a.action_type === 'lead')?.value;
+          // Vyda: solo offsite_conversion.fb_pixel_purchase = "Acquisti sul sito web"
+          // NON sommare più tipi: si sovrappongono e causano doppio conteggio
+          const purchaseVal = isVyda
+            ? parseFloat(c.actions?.find(a => a.action_type === 'offsite_conversion.fb_pixel_purchase')?.value) || 0
+            : null;
+          const lead = isVyda ? purchaseVal : (parseFloat(leadVal) || 0);
+          const spesa = parseFloat(c.spend) || 0;
+          results.push({
+            campagna:    c.campaign_name || '',
+            cliente:     account.name,
+            lead,
+            spesa,
+            cpl:         lead > 0 ? spesa / lead : 0,
+            impressioni: parseFloat(c.impressions) || 0,
+            click:       parseFloat(c.clicks) || 0,
+            cpm:         parseFloat(c.cpm) || 0,
+            cpc:         parseFloat(c.cpc) || 0,
+            dataDa:      c.date_start || from || '',
+            dataA:       c.date_stop  || to   || '',
+            stato:       'Attiva',
+            campaignId:  c.campaign_id || '',
+            accountId:   account.id,
+            periodo:     preset || 'custom',
+          });
+        }
+
+        // Pagina successiva (se presente)
+        url = data.paging?.next || null;
       }
     } catch (_) {
       // account non accessibile, skip silenzioso
