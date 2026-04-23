@@ -416,24 +416,24 @@ export default function Dashboard() {
   const [appliedFrom, setAppliedFrom] = useState('');
   const [appliedTo, setAppliedTo] = useState('');
 
-  // Dati da Google Sheet (30gg, cached)
+  // Dati da Google Sheet (solo per lastUpdate nella sidebar)
   const sheet = useSheetData('mensile');
 
-  // Dati da Meta API on-demand (ieri o range custom)
-  const metaPreset = mode === 'ieri' ? 'yesterday' : undefined;
+  // Dati da Meta API — sempre live per tutte le modalità
+  const metaPreset = mode === 'mensile' ? 'last_30d' : mode === 'ieri' ? 'yesterday' : undefined;
   const metaFrom   = mode === 'custom' ? appliedFrom : undefined;
   const metaTo     = mode === 'custom' ? appliedTo   : undefined;
   const meta = useMetaData(metaPreset, metaFrom, metaTo);
 
-  // Sorgente dati attiva
-  const isLive   = mode !== 'mensile';
-  const rows         = isLive ? meta.rows         : sheet.rows;
-  const clientGroups = isLive ? meta.clientGroups : sheet.clientGroups;
-  const lastUpdate   = isLive ? (meta.dateRange.from ? `${meta.dateRange.from} → ${meta.dateRange.to}` : '') : sheet.lastUpdate;
-  const dateRange    = isLive ? meta.dateRange     : sheet.dateRange;
-  const loading      = isLive ? meta.loading       : (firestoreLoading || sheet.loading);
-  const dataError    = isLive ? meta.error         : sheet.error;
-  const refresh      = isLive ? meta.refresh       : sheet.refresh;
+  // Sorgente dati attiva — sempre Meta API
+  const isLive       = true;
+  const rows         = meta.rows;
+  const clientGroups = meta.clientGroups;
+  const lastUpdate   = meta.dateRange.from ? `${meta.dateRange.from} → ${meta.dateRange.to}` : '';
+  const dateRange    = meta.dateRange;
+  const loading      = firestoreLoading || meta.loading;
+  const dataError    = meta.error;
+  const refresh      = meta.refresh;
 
   const [view, setView] = useState<View>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
@@ -582,9 +582,9 @@ export default function Dashboard() {
         <div className="mb-6 px-3 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
           <div className="flex items-center gap-2 mb-1">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-            <span className="text-xs font-semibold text-emerald-400">Auto · ogni giorno alle 02:00</span>
+            <span className="text-xs font-semibold text-emerald-400">Dati live da Meta API</span>
           </div>
-          {sheet.lastUpdate && <p className="text-xs text-zinc-500 leading-tight">Ultimo sync: {sheet.lastUpdate}</p>}
+          {meta.dateRange.from && <p className="text-xs text-zinc-500 leading-tight">{meta.dateRange.from} → {meta.dateRange.to}</p>}
         </div>
 
         <nav className="flex-1 space-y-1">
@@ -714,9 +714,9 @@ export default function Dashboard() {
               />
             )}
 
-            {sheet.lastUpdate && (
+            {meta.dateRange.from && (
               <p className="text-center text-xs text-zinc-600 mt-4">
-                Dati sheet: {sheet.lastUpdate} · {isLive && <span className="text-blue-400">Visualizzazione live da Meta API</span>}
+                <span className="text-blue-400">Dati live da Meta API</span> · {meta.dateRange.from} → {meta.dateRange.to}
               </p>
             )}
           </>
